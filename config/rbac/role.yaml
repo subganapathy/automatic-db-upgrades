@@ -1,0 +1,86 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: manager-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: automatic-db-upgrades
+    app.kubernetes.io/part-of: automatic-db-upgrades
+    app.kubernetes.io/managed-by: kustomize
+  name: manager-role
+rules:
+- apiGroups:
+  - dbupgrade.subbug.learning
+  resources:
+  - dbupgrades
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - dbupgrade.subbug.learning
+  resources:
+  - dbupgrades/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - dbupgrade.subbug.learning
+  resources:
+  - dbupgrades/finalizers
+  verbs:
+  - update
+# TODO: Future RBAC for pods access
+# - apiGroups:
+#   - ""
+#   resources:
+#   - pods
+#   verbs:
+#   - get
+#   - list
+#   - watch
+# TODO: Future RBAC for services access
+# - apiGroups:
+#   - ""
+#   resources:
+#   - services
+#   verbs:
+#   - get
+#   - list
+#   - watch
+# TODO: Future RBAC for jobs access
+# - apiGroups:
+#   - batch
+#   resources:
+#   - jobs
+#   verbs:
+#   - get
+#   - list
+#   - watch
+#   - create
+#   - update
+#   - patch
+#   - delete
+# TODO: Future RBAC for custom metrics
+# - apiGroups:
+#   - custom.metrics.k8s.io
+#   resources:
+#   - "*"
+#   verbs:
+#   - get
+#   - list
+# TODO: Future RBAC for external metrics
+# - apiGroups:
+#   - external.metrics.k8s.io
+#   resources:
+#   - "*"
+#   verbs:
+#   - get
+#   - list
+

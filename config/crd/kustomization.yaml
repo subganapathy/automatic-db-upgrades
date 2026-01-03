@@ -1,0 +1,8 @@
+# This kustomization.yaml is not intended to be run by itself,
+# since it depends on service directory and general namespace.
+# Instead this kustomization.yaml is used as a base or is
+# imported.
+resources:
+- bases/dbupgrade.subbug.learning_dbupgrades.yaml
+# +kubebuilder:scaffold:crdkustomizeresource
+

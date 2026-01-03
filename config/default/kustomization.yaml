@@ -1,0 +1,41 @@
+# Adds namespace to all resources.
+namespace: system
+
+# Value of this field is prepended to the
+# names of all resources, e.g. a deployment named
+# "wordpress" becomes "alices-wordpress".
+# Note that it should also match with the prefix (text before '-') of the namespace
+# field above.
+namePrefix: automatic-db-upgrades-
+
+# Labels to add to all resources and selectors.
+#labels:
+#- pairs:
+#  someName: someValue
+#- pairs:
+#  anotherName: anotherValue
+
+# Each entry in this list must resolve to an existing
+# resource definition in YAML. These are the resource
+# files that kustomize reads, modifies and emits as a
+# YAML string, with resources separated by document
+# separators (---).
+resources:
+- ../crd
+- ../rbac
+- ../manager
+
+# Images to be used for resources that declare an image
+# field.
+#images:
+#- name: postgres
+#  newName: my-registry/my-postgres
+#  newTag: v1
+#- digest: sha256:41a7365a8c3c1196c... # Replace with the actual digest
+
+# ConfigMapGenerator defines how to generate ConfigMaps.
+#configMapGenerator:
+#- name: example-configmap-3
+#  files:
+#  - application.properties
+

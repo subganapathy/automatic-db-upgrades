@@ -1,0 +1,64 @@
+apiVersion: dbupgrade.subbug.learning/v1alpha1
+kind: DBUpgrade
+metadata:
+  name: dbupgrade-sample
+spec:
+  migrations:
+    image: "postgres:15-migrations"
+    dir: "/migrations"
+  database:
+    type: "selfHosted"
+    connection:
+      urlSecretRef:
+        name: "db-connection-secret"
+        key: "url"
+  checks:
+    pre:
+      minPodVersions:
+        - selector:
+            matchLabels:
+              app: "my-app"
+          minVersion: "1.2.0"
+          containerName: "app"
+          disallowDowngrade: false
+      metrics:
+        - name: "pre-check-cpu"
+          source: "Custom"
+          metricName: "cpu_usage_percent"
+          target:
+            type: "Pods"
+            pods:
+              selector:
+                matchLabels:
+                  app: "my-app"
+          threshold:
+            operator: "<="
+            value: "80"
+          reduce: "Max"
+          bakeSeconds: 0
+          intervalSeconds: 15
+    post:
+      metrics:
+        - name: "post-check-errors"
+          source: "External"
+          metricName: "error_rate"
+          target:
+            type: "Object"
+            object:
+              ref:
+                apiVersion: "v1"
+                kind: "Service"
+                name: "my-service"
+              selector:
+                matchLabels:
+                  app: "my-app"
+          threshold:
+            operator: "<"
+            value: "0.01"
+          reduce: "Avg"
+          bakeSeconds: 30
+          intervalSeconds: 10
+  runner:
+    serviceAccountName: "dbupgrade-runner"
+    activeDeadlineSeconds: 3600
+

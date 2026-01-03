@@ -1,0 +1,16 @@
+domain: subbug.learning
+layout: go.kubebuilder.io/v4
+projectName: automatic-db-upgrades
+repo: github.com/subganapathy/automatic-db-upgrades
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: subbug.learning
+  group: dbupgrade
+  kind: DBUpgrade
+  path: github.com/subganapathy/automatic-db-upgrades/api/v1alpha1
+  version: v1alpha1
+version: "3"
+
