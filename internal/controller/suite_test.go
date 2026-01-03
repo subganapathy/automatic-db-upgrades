@@ -1,7 +1,6 @@
 package controller_test
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
@@ -13,12 +12,10 @@ var testEnv *envtest.Environment
 func TestMain(m *testing.M) {
 	testEnv = &envtest.Environment{}
 
-	fmt.Fprintln(os.Stderr, "starting envtest...")
-	cfg, err := testEnv.Start()
+	_, err := testEnv.Start()
 	if err != nil {
 		panic(err)
 	}
-	fmt.Fprintf(os.Stderr, "envtest started: host=%s\n", cfg.Host)
 
 	code := m.Run()
 
