@@ -370,4 +370,3 @@ type DBUpgradeList struct {
 func init() {
 	SchemeBuilder.Register(&DBUpgrade{}, &DBUpgradeList{})
 }
-
