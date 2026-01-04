@@ -98,28 +98,29 @@ func (r *DBUpgradeReconciler) updateStatus(ctx context.Context, dbUpgrade *dbupg
 
 		if needsUpdate {
 			// Update observed generation
-			latest.Status.ObservedGeneration = latest.Generation
+			observedGen := latest.Generation
+			latest.Status.ObservedGeneration = observedGen
 
 			// Initialize baseline conditions (do not flap - only set if missing or spec changed)
 			// Accepted=True reason=ValidSpec
-			dbupgradev1alpha1.SetAcceptedTrue(&latest.Status.Conditions, "Spec validated")
+			dbupgradev1alpha1.SetAcceptedTrue(&latest.Status.Conditions, "Spec validated", observedGen)
 
 			// Ready=False reason=Initializing (or Idle if already initialized)
 			readyCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionReady))
 			if readyCondition == nil {
-				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonInitializing, "No upgrade run started yet")
+				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonInitializing, "No upgrade run started yet", observedGen)
 			}
 
 			// Progressing=False reason=Idle
-			dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "No migration in progress")
+			dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "No migration in progress", observedGen)
 
 			// Degraded=False reason=Idle
-			dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionDegraded, false, dbupgradev1alpha1.ReasonIdle, "System is healthy")
+			dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionDegraded, false, dbupgradev1alpha1.ReasonIdle, "System is healthy", observedGen)
 
 			// Blocked=False reason=Idle (if not already set)
 			blockedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionBlocked))
 			if blockedCondition == nil {
-				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionBlocked, false, dbupgradev1alpha1.ReasonIdle, "No blocking conditions detected")
+				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionBlocked, false, dbupgradev1alpha1.ReasonIdle, "No blocking conditions detected", observedGen)
 			}
 		}
 

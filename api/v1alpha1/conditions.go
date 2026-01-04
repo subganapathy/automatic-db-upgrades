@@ -23,26 +23,28 @@ const (
 )
 
 // SetCondition sets or updates a condition in the conditions slice
-func SetCondition(conditions *[]metav1.Condition, conditionType DBUpgradeConditionType, status bool, reason, message string) {
+// observedGeneration should be the object's metadata.generation to track which spec version the condition reflects.
+func SetCondition(conditions *[]metav1.Condition, conditionType DBUpgradeConditionType, status bool, reason, message string, observedGeneration int64) {
 	conditionStatus := metav1.ConditionFalse
 	if status {
 		conditionStatus = metav1.ConditionTrue
 	}
 
 	meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:    string(conditionType),
-		Status:  conditionStatus,
-		Reason:  reason,
-		Message: message,
+		Type:               string(conditionType),
+		Status:             conditionStatus,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: observedGeneration,
 	})
 }
 
 // SetAcceptedTrue sets the Accepted condition to True
-func SetAcceptedTrue(conditions *[]metav1.Condition, message string) {
-	SetCondition(conditions, ConditionAccepted, true, ReasonValidSpec, message)
+func SetAcceptedTrue(conditions *[]metav1.Condition, message string, observedGeneration int64) {
+	SetCondition(conditions, ConditionAccepted, true, ReasonValidSpec, message, observedGeneration)
 }
 
 // SetAcceptedFalse sets the Accepted condition to False
-func SetAcceptedFalse(conditions *[]metav1.Condition, reason, message string) {
-	SetCondition(conditions, ConditionAccepted, false, reason, message)
+func SetAcceptedFalse(conditions *[]metav1.Condition, reason, message string, observedGeneration int64) {
+	SetCondition(conditions, ConditionAccepted, false, reason, message, observedGeneration)
 }
