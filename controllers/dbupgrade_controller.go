@@ -89,50 +89,66 @@ func (r *DBUpgradeReconciler) updateStatus(ctx context.Context, dbUpgrade *dbupg
 		// Create a deep copy to compare against
 		orig := latest.DeepCopy()
 
-		// Check if status needs to be updated (spec changed or Accepted condition missing)
-		needsUpdate := latest.Status.ObservedGeneration != latest.Generation
+		// Check if spec changed (new generation)
+		specChanged := latest.Status.ObservedGeneration != latest.Generation
 
 		// Check if Accepted condition exists
 		acceptedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionAccepted))
-		needsUpdate = needsUpdate || acceptedCondition == nil
+		missingAccepted := acceptedCondition == nil
 
-		if needsUpdate {
+		// Update status if spec changed or Accepted condition is missing
+		if specChanged || missingAccepted {
 			// Update observed generation
 			observedGen := latest.Generation
 			latest.Status.ObservedGeneration = observedGen
 
-			// Initialize baseline conditions (do not flap - only set if missing or spec changed)
-			// Accepted=True reason=ValidSpec
+			// Always set Accepted=True when spec changes or is missing
 			dbupgradev1alpha1.SetAcceptedTrue(&latest.Status.Conditions, "Spec validated", observedGen)
 
-			// Check if Blocked condition exists and is True
-			blockedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionBlocked))
-			isBlocked := blockedCondition != nil && blockedCondition.Status == metav1.ConditionTrue
+			if specChanged {
+				// Spec changed: reset baseline conditions deterministically for new spec
+				// This prevents stale Ready=True from previous successful upgrade
+				// Check if Blocked condition exists and is True (before reset)
+				blockedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionBlocked))
+				isBlocked := blockedCondition != nil && blockedCondition.Status == metav1.ConditionTrue
 
-			// If Blocked=True, ensure Progressing=False and Ready=False
-			// Otherwise, initialize Ready=False and Progressing=False
-			if isBlocked {
-				// Blocked=True: enforce Progressing=False and Ready=False
-				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "Blocked - migration cannot progress", observedGen)
-				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonIdle, "Blocked - precheck gate failing", observedGen)
+				if isBlocked {
+					// Blocked=True: enforce Progressing=False and Ready=False
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "Blocked - migration cannot progress", observedGen)
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonIdle, "Blocked - precheck gate failing", observedGen)
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionBlocked, true, blockedCondition.Reason, blockedCondition.Message, observedGen)
+				} else {
+					// Reset baseline conditions for new spec
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonInitializing, "No upgrade run started yet", observedGen)
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "No migration in progress", observedGen)
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionBlocked, false, dbupgradev1alpha1.ReasonIdle, "No blocking conditions detected", observedGen)
+				}
+
+				// Degraded=False reason=Idle (always reset on spec change)
+				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionDegraded, false, dbupgradev1alpha1.ReasonIdle, "System is healthy", observedGen)
 			} else {
-				// Ready=False reason=Initializing (or Idle if already initialized)
+				// Spec hasn't changed, but Accepted was missing: only fill in missing conditions
+				// Don't stomp existing conditions
 				readyCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionReady))
 				if readyCondition == nil {
 					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonInitializing, "No upgrade run started yet", observedGen)
 				}
 
-				// Progressing=False reason=Idle
-				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "No migration in progress", observedGen)
+				progressingCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionProgressing))
+				if progressingCondition == nil {
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "No migration in progress", observedGen)
+				}
 
-				// Blocked=False reason=Idle (if not already set)
+				blockedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionBlocked))
 				if blockedCondition == nil {
 					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionBlocked, false, dbupgradev1alpha1.ReasonIdle, "No blocking conditions detected", observedGen)
 				}
-			}
 
-			// Degraded=False reason=Idle
-			dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionDegraded, false, dbupgradev1alpha1.ReasonIdle, "System is healthy", observedGen)
+				degradedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionDegraded))
+				if degradedCondition == nil {
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionDegraded, false, dbupgradev1alpha1.ReasonIdle, "System is healthy", observedGen)
+				}
+			}
 		}
 
 		// Only patch if status actually changed
