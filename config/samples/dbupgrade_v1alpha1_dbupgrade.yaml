@@ -11,7 +11,7 @@ spec:
     connection:
       urlSecretRef:
         name: "db-connection-secret"
-        key: "url"
+        key: "url"  # Default is "url" if not specified
   checks:
     pre:
       minPodVersions:
@@ -33,7 +33,7 @@ spec:
                   app: "my-app"
           threshold:
             operator: "<="
-            value: "80"
+            value: "80"  # resource.Quantity format (e.g., "5", "1.5", "250m")
           reduce: "Max"
           bakeSeconds: 0
           intervalSeconds: 15
@@ -54,7 +54,7 @@ spec:
                   app: "my-app"
           threshold:
             operator: "<"
-            value: "0.01"
+            value: "0.01"  # resource.Quantity format
           reduce: "Avg"
           bakeSeconds: 30
           intervalSeconds: 10

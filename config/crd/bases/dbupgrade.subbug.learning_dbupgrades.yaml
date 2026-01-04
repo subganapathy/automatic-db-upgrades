@@ -11,10 +11,29 @@ spec:
     kind: DBUpgrade
     listKind: DBUpgradeList
     plural: dbupgrades
+    shortNames:
+    - dbu
     singular: dbupgrade
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: Ready condition
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - description: Progressing condition
+      jsonPath: .status.conditions[?(@.type=="Progressing")].status
+      name: Progressing
+      type: string
+    - description: Degraded condition
+      jsonPath: .status.conditions[?(@.type=="Degraded")].status
+      name: Degraded
+      type: string
+    - description: Most recent spec generation observed
+      jsonPath: .status.observedGeneration
+      name: ObservedGen
+      type: integer
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: DBUpgrade is the Schema for the dbupgrades API
@@ -301,8 +320,13 @@ spec:
                                   description: Operator for comparison
                                   type: string
                                 value:
-                                  description: Value to compare against
-                                  type: string
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: Value to compare against (resource.Quantity
+                                    format, e.g., "5", "1.5", "250m")
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
                               required:
                               - operator
                               - value
@@ -573,8 +597,13 @@ spec:
                                   description: Operator for comparison
                                   type: string
                                 value:
-                                  description: Value to compare against
-                                  type: string
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: Value to compare against (resource.Quantity
+                                    format, e.g., "5", "1.5", "250m")
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
                               required:
                               - operator
                               - value
@@ -687,13 +716,22 @@ spec:
                           database URL
                         properties:
                           key:
-                            default: url
-                            description: Key in the secret containing the URL
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
                             type: string
                           name:
-                            description: Name of the secret
+                            description: |-
+                              Name of the referent.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                             type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
                         type: object
+                        x-kubernetes-map-type: atomic
                     type: object
                   type:
                     allOf:
@@ -799,6 +837,9 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               observedGeneration:
                 description: ObservedGeneration reflects the generation of the most
                   recently observed DBUpgrade

@@ -1,5 +1,6 @@
 # Go / build outputs
 bin/
+bin/manager
 cover.out
 *.test
 *.log
@@ -7,6 +8,8 @@ cover.out
 # Local tooling caches (Cursor/Go)
 .go-cache/
 .go-versions/
+.go-mod-cache/
+.fresh-mod-cache/
 .DS_Store
 
 # IDE
@@ -15,3 +18,4 @@ cover.out
 
 # Envtest assets downloaded by setup-envtest (these are huge)
 bin/k8s/
+
