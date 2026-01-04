@@ -323,8 +323,9 @@ spec:
                                   anyOf:
                                   - type: integer
                                   - type: string
-                                  description: Value to compare against (resource.Quantity
-                                    format, e.g., "5", "1.5", "250m")
+                                  description: |-
+                                    Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
+                                    Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
                                   pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                                   x-kubernetes-int-or-string: true
                               required:
@@ -600,8 +601,9 @@ spec:
                                   anyOf:
                                   - type: integer
                                   - type: string
-                                  description: Value to compare against (resource.Quantity
-                                    format, e.g., "5", "1.5", "250m")
+                                  description: |-
+                                    Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
+                                    Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
                                   pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                                   x-kubernetes-int-or-string: true
                               required:

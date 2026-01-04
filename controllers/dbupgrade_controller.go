@@ -105,23 +105,34 @@ func (r *DBUpgradeReconciler) updateStatus(ctx context.Context, dbUpgrade *dbupg
 			// Accepted=True reason=ValidSpec
 			dbupgradev1alpha1.SetAcceptedTrue(&latest.Status.Conditions, "Spec validated", observedGen)
 
-			// Ready=False reason=Initializing (or Idle if already initialized)
-			readyCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionReady))
-			if readyCondition == nil {
-				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonInitializing, "No upgrade run started yet", observedGen)
-			}
+			// Check if Blocked condition exists and is True
+			blockedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionBlocked))
+			isBlocked := blockedCondition != nil && blockedCondition.Status == metav1.ConditionTrue
 
-			// Progressing=False reason=Idle
-			dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "No migration in progress", observedGen)
+			// If Blocked=True, ensure Progressing=False and Ready=False
+			// Otherwise, initialize Ready=False and Progressing=False
+			if isBlocked {
+				// Blocked=True: enforce Progressing=False and Ready=False
+				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "Blocked - migration cannot progress", observedGen)
+				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonIdle, "Blocked - precheck gate failing", observedGen)
+			} else {
+				// Ready=False reason=Initializing (or Idle if already initialized)
+				readyCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionReady))
+				if readyCondition == nil {
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionReady, false, dbupgradev1alpha1.ReasonInitializing, "No upgrade run started yet", observedGen)
+				}
+
+				// Progressing=False reason=Idle
+				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionProgressing, false, dbupgradev1alpha1.ReasonIdle, "No migration in progress", observedGen)
+
+				// Blocked=False reason=Idle (if not already set)
+				if blockedCondition == nil {
+					dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionBlocked, false, dbupgradev1alpha1.ReasonIdle, "No blocking conditions detected", observedGen)
+				}
+			}
 
 			// Degraded=False reason=Idle
 			dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionDegraded, false, dbupgradev1alpha1.ReasonIdle, "System is healthy", observedGen)
-
-			// Blocked=False reason=Idle (if not already set)
-			blockedCondition := findCondition(latest.Status.Conditions, string(dbupgradev1alpha1.ConditionBlocked))
-			if blockedCondition == nil {
-				dbupgradev1alpha1.SetCondition(&latest.Status.Conditions, dbupgradev1alpha1.ConditionBlocked, false, dbupgradev1alpha1.ReasonIdle, "No blocking conditions detected", observedGen)
-			}
 		}
 
 		// Only patch if status actually changed

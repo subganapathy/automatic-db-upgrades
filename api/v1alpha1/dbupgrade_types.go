@@ -16,11 +16,11 @@ type DBUpgradeSpec struct {
 
 	// Pre and post upgrade checks
 	// +optional
-	Checks ChecksSpec `json:"checks,omitempty"`
+	Checks *ChecksSpec `json:"checks,omitempty"`
 
 	// Runner configuration
 	// +optional
-	Runner RunnerSpec `json:"runner,omitempty"`
+	Runner *RunnerSpec `json:"runner,omitempty"`
 }
 
 // MigrationsSpec defines the migration configuration
@@ -44,7 +44,7 @@ type DatabaseSpec struct {
 
 	// Connection configuration
 	// +optional
-	Connection ConnectionSpec `json:"connection,omitempty"`
+	Connection *ConnectionSpec `json:"connection,omitempty"`
 
 	// AWS-specific configuration (placeholders for future use)
 	// +optional
@@ -80,8 +80,7 @@ type AWSSpec struct {
 
 	// Port is the database port
 	// +kubebuilder:default=5432
-	// +optional
-	Port *int32 `json:"port,omitempty"`
+	Port int32 `json:"port,omitempty"`
 
 	// DBName is the database name
 	// +optional
@@ -173,13 +172,11 @@ type MetricCheck struct {
 
 	// BakeSeconds is the time to wait before evaluating
 	// +kubebuilder:default=0
-	// +optional
-	BakeSeconds *int32 `json:"bakeSeconds,omitempty"`
+	BakeSeconds int32 `json:"bakeSeconds,omitempty"`
 
 	// IntervalSeconds is the interval between metric queries
 	// +kubebuilder:default=15
-	// +optional
-	IntervalSeconds *int32 `json:"intervalSeconds,omitempty"`
+	IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
 }
 
 // MetricSource represents the source of a metric
@@ -192,6 +189,8 @@ const (
 )
 
 // MetricTarget defines what to query for a metric
+// NOTE: Cross-field validation (e.g., type=Pods requires Pods to be set) must be enforced
+// in controller validation logic in Phase 1, as CRD schema alone cannot easily enforce this.
 type MetricTarget struct {
 	// Type of target
 	// +kubebuilder:validation:Required
@@ -268,7 +267,8 @@ type ThresholdSpec struct {
 	// +kubebuilder:validation:Enum=">";">=";"<";"<="
 	Operator ThresholdOperator `json:"operator"`
 
-	// Value to compare against (resource.Quantity format, e.g., "5", "1.5", "250m")
+	// Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
+	// Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
 	// +kubebuilder:validation:Required
 	Value resource.Quantity `json:"value"`
 }
@@ -331,7 +331,8 @@ const (
 	// DBUpgradeConditionProgressing indicates the DBUpgrade is progressing
 	DBUpgradeConditionProgressing DBUpgradeConditionType = "Progressing"
 
-	// DBUpgradeConditionBlocked indicates the DBUpgrade is blocked
+	// DBUpgradeConditionBlocked indicates the DBUpgrade is blocked (precheck gate is currently failing).
+	// When Blocked=True: Progressing must be False, Ready must be False.
 	DBUpgradeConditionBlocked DBUpgradeConditionType = "Blocked"
 
 	// DBUpgradeConditionDegraded indicates the DBUpgrade is degraded
