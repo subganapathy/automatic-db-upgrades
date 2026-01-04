@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -63,19 +65,7 @@ const (
 type ConnectionSpec struct {
 	// URLSecretRef references a secret containing the database URL
 	// +optional
-	URLSecretRef *SecretReference `json:"urlSecretRef,omitempty"`
-}
-
-// SecretReference references a secret
-type SecretReference struct {
-	// Name of the secret
-	// +optional
-	Name string `json:"name,omitempty"`
-
-	// Key in the secret containing the URL
-	// +kubebuilder:default="url"
-	// +optional
-	Key string `json:"key,omitempty"`
+	URLSecretRef *corev1.SecretKeySelector `json:"urlSecretRef,omitempty"`
 }
 
 // AWSSpec defines AWS-specific database configuration
@@ -278,9 +268,9 @@ type ThresholdSpec struct {
 	// +kubebuilder:validation:Enum=">";">=";"<";"<="
 	Operator ThresholdOperator `json:"operator"`
 
-	// Value to compare against
+	// Value to compare against (resource.Quantity format, e.g., "5", "1.5", "250m")
 	// +kubebuilder:validation:Required
-	Value string `json:"value"`
+	Value resource.Quantity `json:"value"`
 }
 
 // ThresholdOperator represents a comparison operator
@@ -323,6 +313,8 @@ type DBUpgradeStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Conditions represent the latest available observations of DBUpgrade's state
+	// +listType=map
+	// +listMapKey=type
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -348,6 +340,11 @@ const (
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resource:shortName=dbu
+//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description="Ready condition"
+//+kubebuilder:printcolumn:name="Progressing",type=string,JSONPath=".status.conditions[?(@.type==\"Progressing\")].status",description="Progressing condition"
+//+kubebuilder:printcolumn:name="Degraded",type=string,JSONPath=".status.conditions[?(@.type==\"Degraded\")].status",description="Degraded condition"
+//+kubebuilder:printcolumn:name="ObservedGen",type=integer,JSONPath=".status.observedGeneration",description="Most recent spec generation observed"
 
 // DBUpgrade is the Schema for the dbupgrades API
 type DBUpgrade struct {

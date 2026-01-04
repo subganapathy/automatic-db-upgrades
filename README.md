@@ -62,8 +62,15 @@ make run
 # In another terminal, apply the sample
 kubectl apply -f config/samples/dbupgrade_v1alpha1_dbupgrade.yaml
 
-# Check status
+# Check status (shows print columns)
+kubectl get dbupgrades
+# Output columns: NAME, READY, PROGRESSING, DEGRADED, OBSERVEDGEN
+
+# View detailed status
 kubectl get dbupgrade dbupgrade-sample -o yaml
+
+# Check conditions (primary status surface)
+kubectl get dbupgrade dbupgrade-sample -o jsonpath='{.status.conditions[*]}'
 ```
 
 ## API Version
@@ -72,6 +79,7 @@ kubectl get dbupgrade dbupgrade-sample -o yaml
 - Version: `v1alpha1`
 - Kind: `DBUpgrade`
 - CRD: `dbupgrades.dbupgrade.subbug.learning`
+- Short name: `dbu` (use `kubectl get dbu` instead of `kubectl get dbupgrades`)
 
 ## Generated Files
 
@@ -89,9 +97,53 @@ go vet ./...
 make build
 ```
 
+## Status and Conditions
+
+The `DBUpgrade` status uses Kubernetes-standard conditions to report state:
+
+- **Accepted**: Indicates the spec is valid (`True` with reason `ValidSpec`)
+- **Ready**: Indicates the upgrade is complete and ready (`False` initially with reason `Initializing`)
+- **Progressing**: Indicates an upgrade is in progress (`False` at rest with reason `Idle`)
+- **Degraded**: Indicates the system is in a degraded state (`False` when healthy)
+- **Blocked**: Indicates the upgrade is blocked by some condition
+
+Conditions are the primary way to check the status of a `DBUpgrade` resource:
+
+```bash
+# View all conditions
+kubectl get dbupgrade dbupgrade-sample -o jsonpath='{.status.conditions[*]}'
+
+# Check Ready condition
+kubectl get dbupgrade dbupgrade-sample -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+```
+
+The `kubectl get dbupgrades` command shows key conditions in columns for quick status checks.
+
 ## Phase 0 Controller Behavior
 
-The controller currently only updates the status with conditions:
-- Sets `status.observedGeneration = metadata.generation`
-- Updates conditions: Ready, Progressing, Blocked, Degraded
+The controller initializes baseline status:
+- Sets `status.observedGeneration = metadata.generation` when spec changes
+- Initializes conditions: Accepted=True, Ready=False, Progressing=False, Degraded=False
+- Uses patch-based status updates to avoid unnecessary updates
 - No Job creation or metrics queries yet (to be implemented in later phases)
+
+### Sample CR
+
+```yaml
+apiVersion: dbupgrade.subbug.learning/v1alpha1
+kind: DBUpgrade
+metadata:
+  name: dbupgrade-sample
+spec:
+  migrations:
+    image: "postgres:15-migrations"
+    dir: "/migrations"
+  database:
+    type: "selfHosted"
+    connection:
+      urlSecretRef:
+        name: "db-connection-secret"
+        key: "url"
+```
+
+See `config/samples/dbupgrade_v1alpha1_dbupgrade.yaml` for a complete example.
