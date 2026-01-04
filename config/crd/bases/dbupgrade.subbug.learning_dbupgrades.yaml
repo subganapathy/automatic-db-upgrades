@@ -65,9 +65,12 @@ spec:
                     description: Post-upgrade checks
                     properties:
                       metrics:
-                        description: Metrics to check
+                        description: Metrics to check (list-as-map keyed by name for
+                          GitOps-friendly edits)
                         items:
-                          description: MetricCheck defines a metric check
+                          description: |-
+                            MetricCheck defines a metric check
+                            Note: Name is required when Metrics list contains multiple entries (list-as-map semantics).
                           properties:
                             bakeSeconds:
                               default: 0
@@ -85,7 +88,8 @@ spec:
                               description: MetricName is the name of the metric
                               type: string
                             name:
-                              description: Name of the check (optional)
+                              description: Name of the check (required when multiple
+                                metrics are defined for list-as-map semantics)
                               type: string
                             reduce:
                               allOf:
@@ -326,6 +330,8 @@ spec:
                                   description: |-
                                     Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
                                     Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
+                                    In Phase 1 controller logic, use Quantity.AsApproximateFloat64() or string parsing consistently
+                                    for both metric values and threshold comparisons.
                                   pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                                   x-kubernetes-int-or-string: true
                               required:
@@ -334,18 +340,25 @@ spec:
                               type: object
                           required:
                           - metricName
+                          - name
                           - target
                           - threshold
                           type: object
                         type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
                     type: object
                   pre:
                     description: Pre-upgrade checks
                     properties:
                       metrics:
-                        description: Metrics to check
+                        description: Metrics to check (list-as-map keyed by name for
+                          GitOps-friendly edits)
                         items:
-                          description: MetricCheck defines a metric check
+                          description: |-
+                            MetricCheck defines a metric check
+                            Note: Name is required when Metrics list contains multiple entries (list-as-map semantics).
                           properties:
                             bakeSeconds:
                               default: 0
@@ -363,7 +376,8 @@ spec:
                               description: MetricName is the name of the metric
                               type: string
                             name:
-                              description: Name of the check (optional)
+                              description: Name of the check (required when multiple
+                                metrics are defined for list-as-map semantics)
                               type: string
                             reduce:
                               allOf:
@@ -604,6 +618,8 @@ spec:
                                   description: |-
                                     Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
                                     Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
+                                    In Phase 1 controller logic, use Quantity.AsApproximateFloat64() or string parsing consistently
+                                    for both metric values and threshold comparisons.
                                   pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                                   x-kubernetes-int-or-string: true
                               required:
@@ -612,10 +628,14 @@ spec:
                               type: object
                           required:
                           - metricName
+                          - name
                           - target
                           - threshold
                           type: object
                         type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
                       minPodVersions:
                         description: Minimum pod versions to check
                         items:
@@ -848,6 +868,8 @@ spec:
                 format: int64
                 type: integer
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

@@ -108,14 +108,18 @@ type PreChecksSpec struct {
 	// +optional
 	MinPodVersions []MinPodVersionCheck `json:"minPodVersions,omitempty"`
 
-	// Metrics to check
+	// Metrics to check (list-as-map keyed by name for GitOps-friendly edits)
+	// +listType=map
+	// +listMapKey=name
 	// +optional
 	Metrics []MetricCheck `json:"metrics,omitempty"`
 }
 
 // PostChecksSpec defines post-upgrade checks
 type PostChecksSpec struct {
-	// Metrics to check
+	// Metrics to check (list-as-map keyed by name for GitOps-friendly edits)
+	// +listType=map
+	// +listMapKey=name
 	// +optional
 	Metrics []MetricCheck `json:"metrics,omitempty"`
 }
@@ -141,10 +145,10 @@ type MinPodVersionCheck struct {
 }
 
 // MetricCheck defines a metric check
+// Note: Name is required when Metrics list contains multiple entries (list-as-map semantics).
 type MetricCheck struct {
-	// Name of the check (optional)
-	// +optional
-	Name string `json:"name,omitempty"`
+	// Name of the check (required when multiple metrics are defined for list-as-map semantics)
+	Name string `json:"name"`
 
 	// Source of the metric
 	// +kubebuilder:validation:Enum=Custom;External
@@ -269,6 +273,8 @@ type ThresholdSpec struct {
 
 	// Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
 	// Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
+	// In Phase 1 controller logic, use Quantity.AsApproximateFloat64() or string parsing consistently
+	// for both metric values and threshold comparisons.
 	// +kubebuilder:validation:Required
 	Value resource.Quantity `json:"value"`
 }
@@ -352,7 +358,7 @@ type DBUpgrade struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   DBUpgradeSpec   `json:"spec,omitempty"`
+	Spec   DBUpgradeSpec   `json:"spec"`
 	Status DBUpgradeStatus `json:"status,omitempty"`
 }
 
