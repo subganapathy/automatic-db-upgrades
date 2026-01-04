@@ -68,9 +68,7 @@ spec:
                         description: Metrics to check (list-as-map keyed by name for
                           GitOps-friendly edits)
                         items:
-                          description: |-
-                            MetricCheck defines a metric check
-                            Note: Name is required when Metrics list contains multiple entries (list-as-map semantics).
+                          description: MetricCheck defines a metric check
                           properties:
                             bakeSeconds:
                               default: 0
@@ -88,8 +86,9 @@ spec:
                               description: MetricName is the name of the metric
                               type: string
                             name:
-                              description: Name of the check (required when multiple
-                                metrics are defined for list-as-map semantics)
+                              description: Name is required and must be unique (list-as-map
+                                semantics).
+                              minLength: 1
                               type: string
                             reduce:
                               allOf:
@@ -356,9 +355,7 @@ spec:
                         description: Metrics to check (list-as-map keyed by name for
                           GitOps-friendly edits)
                         items:
-                          description: |-
-                            MetricCheck defines a metric check
-                            Note: Name is required when Metrics list contains multiple entries (list-as-map semantics).
+                          description: MetricCheck defines a metric check
                           properties:
                             bakeSeconds:
                               default: 0
@@ -376,8 +373,9 @@ spec:
                               description: MetricName is the name of the metric
                               type: string
                             name:
-                              description: Name of the check (required when multiple
-                                metrics are defined for list-as-map semantics)
+                              description: Name is required and must be unique (list-as-map
+                                semantics).
+                              minLength: 1
                               type: string
                             reduce:
                               allOf:

@@ -145,9 +145,10 @@ type MinPodVersionCheck struct {
 }
 
 // MetricCheck defines a metric check
-// Note: Name is required when Metrics list contains multiple entries (list-as-map semantics).
 type MetricCheck struct {
-	// Name of the check (required when multiple metrics are defined for list-as-map semantics)
+	// Name is required and must be unique (list-as-map semantics).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// Source of the metric
