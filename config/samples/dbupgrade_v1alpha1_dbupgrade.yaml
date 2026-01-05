@@ -59,6 +59,46 @@ spec:
           bakeSeconds: 30
           intervalSeconds: 10
   runner:
-    serviceAccountName: "dbupgrade-runner"
     activeDeadlineSeconds: 3600
-
+---
+apiVersion: dbupgrade.subbug.learning/v1alpha1
+kind: DBUpgrade
+metadata:
+  name: dbupgrade-aws-sample
+spec:
+  migrations:
+    image: "myapp/migrations:v2.0.0"
+    dir: "/migrations"
+  database:
+    type: "awsRds"
+    aws:
+      roleArn: "arn:aws:iam::123456789012:role/myapp-db-migrator"
+      region: "us-east-1"
+      host: "mydb.abc123.us-east-1.rds.amazonaws.com"
+      port: 5432
+      dbName: "myapp"
+      username: "migrator"
+  checks:
+    pre:
+      minPodVersions:
+        - selector:
+            matchLabels:
+              app: "myapp"
+          minVersion: "v1.5.0"
+          containerName: "app"
+      metrics:
+        - name: "pre-check-cpu"
+          source: "Custom"
+          metricName: "cpu_usage_percent"
+          target:
+            type: "Pods"
+            pods:
+              selector:
+                matchLabels:
+                  app: "myapp"
+          threshold:
+            operator: "<="
+            value: "80"
+          reduce: "Max"
+  runner:
+    activeDeadlineSeconds: 900

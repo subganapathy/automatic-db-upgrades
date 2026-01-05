@@ -714,7 +714,7 @@ spec:
                         description: DBName is the database name
                         type: string
                       host:
-                        description: Host is the database host
+                        description: Host is the database endpoint
                         type: string
                       port:
                         default: 5432
@@ -724,9 +724,25 @@ spec:
                       region:
                         description: Region is the AWS region
                         type: string
-                      username:
-                        description: Username for database access
+                      roleArn:
+                        description: |-
+                          RoleArn is the IAM role that the operator will assume to generate RDS auth tokens
+                          This role must:
+                          - Have trust policy allowing the operator's IAM role (via AssumeRole)
+                          - Have rds-db:connect permission for the database
+                          The operator has EKS Pod Identity and can assume this role
+                        pattern: ^arn:aws:iam::\d{12}:role\/[\w+=,.@-]+$
                         type: string
+                      username:
+                        description: Username for database access (must be an RDS
+                          IAM user)
+                        type: string
+                    required:
+                    - dbName
+                    - host
+                    - region
+                    - roleArn
+                    - username
                     type: object
                   connection:
                     description: Connection configuration
@@ -785,12 +801,12 @@ spec:
                 description: Runner configuration
                 properties:
                   activeDeadlineSeconds:
-                    description: ActiveDeadlineSeconds for the runner job
+                    description: |-
+                      ActiveDeadlineSeconds for the runner job
+                      Can be > 15 minutes even with RDS IAM auth - tokens only expire for
+                      establishing connections, not for keeping them open
                     format: int64
                     type: integer
-                  serviceAccountName:
-                    description: ServiceAccountName for the runner pod
-                    type: string
                 type: object
             required:
             - database

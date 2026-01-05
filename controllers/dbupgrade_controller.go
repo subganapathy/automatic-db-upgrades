@@ -25,19 +25,29 @@ type DBUpgradeReconciler struct {
 //+kubebuilder:rbac:groups=dbupgrade.subbug.learning,resources=dbupgrades/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=dbupgrade.subbug.learning,resources=dbupgrades/finalizers,verbs=update
 
-// TODO: Future RBAC for pods access
+// RBAC for migration Jobs - controller creates, monitors, and cleans up Jobs
+//+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
+
+// RBAC for Secrets - controller creates RDS tokens or reads user-provided secrets
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+
+// RBAC for Leases - controller acquires leases for single-writer guarantee
+//+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
+
+// RBAC for Events - controller emits events for observability
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
+// TODO: Future RBAC for pods access (pre-check: pod version validation)
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
 // TODO: Future RBAC for services access
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
 
-// TODO: Future RBAC for jobs access
-//+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
-
-// TODO: Future RBAC for custom metrics
+// TODO: Future RBAC for custom metrics (pre/post checks)
 //+kubebuilder:rbac:groups=custom.metrics.k8s.io,resources=*,verbs=get;list
 
-// TODO: Future RBAC for external metrics
+// TODO: Future RBAC for external metrics (pre/post checks)
 //+kubebuilder:rbac:groups=external.metrics.k8s.io,resources=*,verbs=get;list
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to

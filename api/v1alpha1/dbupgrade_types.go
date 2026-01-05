@@ -69,26 +69,37 @@ type ConnectionSpec struct {
 }
 
 // AWSSpec defines AWS-specific database configuration
+// The operator (not the migration job) assumes this role to generate RDS tokens
 type AWSSpec struct {
-	// Region is the AWS region
-	// +optional
-	Region string `json:"region,omitempty"`
+	// RoleArn is the IAM role that the operator will assume to generate RDS auth tokens
+	// This role must:
+	// - Have trust policy allowing the operator's IAM role (via AssumeRole)
+	// - Have rds-db:connect permission for the database
+	// The operator has EKS Pod Identity and can assume this role
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^arn:aws:iam::\d{12}:role\/[\w+=,.@-]+$`
+	RoleArn string `json:"roleArn"`
 
-	// Host is the database host
-	// +optional
-	Host string `json:"host,omitempty"`
+	// Region is the AWS region
+	// +kubebuilder:validation:Required
+	Region string `json:"region"`
+
+	// Host is the database endpoint
+	// +kubebuilder:validation:Required
+	Host string `json:"host"`
 
 	// Port is the database port
 	// +kubebuilder:default=5432
+	// +optional
 	Port int32 `json:"port,omitempty"`
 
 	// DBName is the database name
-	// +optional
-	DBName string `json:"dbName,omitempty"`
+	// +kubebuilder:validation:Required
+	DBName string `json:"dbName"`
 
-	// Username for database access
-	// +optional
-	Username string `json:"username,omitempty"`
+	// Username for database access (must be an RDS IAM user)
+	// +kubebuilder:validation:Required
+	Username string `json:"username"`
 }
 
 // ChecksSpec defines pre and post upgrade checks
@@ -304,11 +315,9 @@ const (
 
 // RunnerSpec defines runner configuration
 type RunnerSpec struct {
-	// ServiceAccountName for the runner pod
-	// +optional
-	ServiceAccountName string `json:"serviceAccountName,omitempty"`
-
 	// ActiveDeadlineSeconds for the runner job
+	// Can be > 15 minutes even with RDS IAM auth - tokens only expire for
+	// establishing connections, not for keeping them open
 	// +optional
 	ActiveDeadlineSeconds *int64 `json:"activeDeadlineSeconds,omitempty"`
 }

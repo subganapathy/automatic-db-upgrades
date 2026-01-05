@@ -2,19 +2,16 @@
 
 Kubernetes operator for automated database upgrades using kubebuilder.
 
-## Phase 0 Status ✅
+## Milestone 1 Status ✅
 
-**All steps completed successfully!**
+**API refinement and validation completed!**
 
-✅ Project scaffolded with kubebuilder  
-✅ Complete DBUpgrade CRD API with all required fields  
-✅ Minimal reconciler that updates status/conditions  
-✅ RBAC configured with TODO comments for future permissions  
-✅ Sample manifests created  
-✅ DeepCopy code generated  
-✅ CRD manifest generated  
-✅ Go 1.23.3 downloaded and available  
-✅ `make generate` and `make manifests` working  
+✅ API updated - ServiceAccount configuration removed (operator-managed)
+✅ AWS IAM authentication model implemented (operator assumes customer roles)
+✅ Validation webhook added with comprehensive validation tests
+✅ RBAC permissions configured for Jobs, Secrets, Leases, Events
+✅ Sample CRs updated with both self-hosted and AWS examples
+✅ Documentation complete for IAM setup and validation rules  
 
 ## Project Structure
 
@@ -146,4 +143,108 @@ spec:
         key: "url"
 ```
 
-See `config/samples/dbupgrade_v1alpha1_dbupgrade.yaml` for a complete example.
+See `config/samples/dbupgrade_v1alpha1_dbupgrade.yaml` for complete examples.
+
+## AWS RDS/Aurora Authentication
+
+The DBUpgrade operator handles all AWS IAM authentication.
+Migration jobs run as plain pods without IAM roles.
+
+### How it works
+
+1. You specify an IAM `roleArn` in the DBUpgrade spec
+2. The operator (which has EKS Pod Identity) assumes your role
+3. The operator generates a short-lived RDS IAM auth token (valid 15 minutes)
+4. The operator stores the token in a Kubernetes Secret
+5. The migration Job reads the Secret to connect to the database
+
+### IAM Setup Required
+
+**Your IAM Role** (`roleArn` in spec):
+- Must have `rds-db:connect` permission for your database
+- Must have trust policy allowing the operator's IAM role to assume it:
+  ```json
+  {
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::PLATFORM_ACCOUNT:role/dbupgrade-operator"
+    },
+    "Action": "sts:AssumeRole"
+  }
+  ```
+
+**Operator's IAM Role** (platform-managed):
+- Has EKS Pod Identity
+- Has permission to assume customer roles:
+  ```json
+  {
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Resource": "arn:aws:iam::*:role/*-db-migrator"
+  }
+  ```
+
+### AWS Example
+
+```yaml
+apiVersion: dbupgrade.subbug.learning/v1alpha1
+kind: DBUpgrade
+metadata:
+  name: myapp-upgrade
+spec:
+  migrations:
+    image: "myapp/migrations:v2.0.0"
+  database:
+    type: "awsRds"
+    aws:
+      roleArn: "arn:aws:iam::123456789012:role/myapp-db-migrator"
+      region: "us-east-1"
+      host: "mydb.abc123.us-east-1.rds.amazonaws.com"
+      port: 5432
+      dbName: "myapp"
+      username: "migrator"
+  runner:
+    activeDeadlineSeconds: 900
+```
+
+## Validation
+
+The DBUpgrade webhook validates:
+- Database type matches configuration (e.g., `type=awsRds` requires `aws` or `connection`)
+- AWS configuration has all required fields when specified
+- Metric checks have matching target types (e.g., `type=Pods` requires `target.pods`)
+- Threshold values are valid Kubernetes Quantities
+
+### Validation Examples
+
+```yaml
+# ❌ Invalid - awsRds without AWS config or connection secret
+spec:
+  database:
+    type: awsRds
+
+# ✅ Valid - awsRds with AWS config
+spec:
+  database:
+    type: awsRds
+    aws:
+      roleArn: arn:aws:iam::123:role/migrator
+      region: us-east-1
+      host: db.amazonaws.com
+      dbName: mydb
+      username: migrator
+
+# ❌ Invalid - selfHosted without connection secret
+spec:
+  database:
+    type: selfHosted
+
+# ✅ Valid - selfHosted with connection secret
+spec:
+  database:
+    type: selfHosted
+    connection:
+      urlSecretRef:
+        name: db-secret
+        key: url
+```
