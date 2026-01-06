@@ -1,6 +1,6 @@
 # DBUpgrade Operator - Resource Inventory
 
-> Complete inventory of implemented components as of Milestone 1 completion
+> Complete inventory of implemented components as of Milestone 2A completion
 
 ---
 
@@ -32,8 +32,10 @@ type DBUpgradeSpec struct {
 ```
 
 #### Migrations Configuration
-- `image`: Container image with migration tools (required)
+- `image`: Container image with `/migrations` directory (required)
 - `dir`: Directory containing migrations (default: `/migrations`)
+
+**Customer Contract**: Provide an image with a `/migrations` directory containing Atlas migration files. No tools/shell required (distroless compatible).
 
 #### Database Configuration
 - **Type**: `selfHosted`, `awsRds`, or `awsAurora`
@@ -130,14 +132,89 @@ ValidateDelete() (admission.Warnings, error)
 
 ## 3. Controller (`controllers/dbupgrade_controller.go`)
 
-### Current Status: Phase 0 Implementation (196 lines)
+### Current Status: Milestone 2A Complete (550+ lines)
 
-### What's Implemented
-- Skeleton reconciler structure
-- Status initialization on spec changes
-- Baseline condition setting (Accepted, Ready, Progressing, Degraded, Blocked)
-- ObservedGeneration tracking
-- Patch-based status updates (avoids unnecessary writes)
+### Architecture: Init Container + Atlas CLI Pattern
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       Migration Job                              │
+├─────────────────────────────────────────────────────────────────┤
+│  Init Container (crane)          │  Main Container (Atlas CLI)  │
+│  ┌─────────────────────────────┐ │  ┌──────────────────────────┐│
+│  │ crane export <customer-img> │ │  │ atlas migrate apply      ││
+│  │   | tar -xf - /migrations   │ │  │   --dir file:///migrations│
+│  │                             │ │  │   --url $DATABASE_URL    ││
+│  └──────────────┬──────────────┘ │  └─────────────┬────────────┘│
+│                 │                │                │              │
+│                 └────────────────┼────────────────┘              │
+│                    emptyDir volume (shared)                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Design Decisions**:
+- **crane**: Extracts `/migrations` from customer image without running it (distroless compatible)
+- **Atlas CLI**: Standardized migration tooling with linting, versioning, safe upgrades
+- **Operator-managed Secret**: Unified codepath for self-hosted and future RDS support
+
+### Container Images Used
+```go
+const (
+    CraneImage = "gcr.io/go-containerregistry/crane:latest"
+    AtlasImage = "arigaio/atlas:latest"
+)
+```
+
+### What's Implemented (Milestone 2A)
+
+#### Secret Validation (`validateSecret`)
+- Validates customer's connection Secret exists
+- Verifies required key exists in Secret.Data
+- Sets Degraded condition if missing
+- Emits SecretNotFound event
+
+#### Unified Secret Creation (`ensureMigrationSecret`)
+- Creates operator-managed Secret from customer's Secret
+- Secret naming: `dbupgrade-{name}-connection`
+- OwnerReference for garbage collection
+- Prepares for RDS token generation (Phase 2C)
+
+#### Job Creation (`createMigrationJob`)
+- Init container: Uses crane to extract migrations
+- Main container: Uses Atlas CLI to run migrations
+- Shared emptyDir volume for migrations
+- DATABASE_URL from operator-managed Secret
+- backoffLimit: 0 (no retries - migrations are idempotent)
+- Spec hash in Job name for change detection
+
+#### Job Status Monitoring (`syncJobStatus`)
+- Maps Job status to DBUpgrade conditions:
+  - No Job → Ready=False/Initializing
+  - Job Running → Progressing=True/MigrationInProgress
+  - Job Succeeded → Ready=True/MigrationComplete
+  - Job Failed → Degraded=True/MigrationFailed
+
+#### Event Emission (`recordEvent`)
+- SecretNotFound (Warning)
+- MigrationStarted (Normal)
+- MigrationSucceeded (Normal)
+- MigrationFailed (Warning)
+
+#### Helper Functions
+- `getJobForDBUpgrade`: Finds Job by owner reference
+- `computeSpecHash`: SHA256 hash for change detection
+- `isJobRunning`, `isJobSucceeded`, `isJobFailed`: Status helpers
+
+### Reconcile Flow
+1. Fetch DBUpgrade resource
+2. Initialize status if needed
+3. Skip non-selfHosted (AWS blocked until Phase 2C)
+4. Validate customer's Secret exists
+5. Ensure operator-managed Secret
+6. Check if Job already exists
+7. Create Job if doesn't exist
+8. Sync Job status to conditions
+9. Requeue if Job still running (10s)
 
 ### RBAC Permissions Configured
 ```yaml
@@ -146,43 +223,64 @@ ValidateDelete() (admission.Warnings, error)
 - dbupgrades/status: get, update, patch
 - dbupgrades/finalizers: update
 
-# For Milestone 2 implementation:
+# For Milestone 2A implementation:
 - jobs: get, list, watch, create, update, patch, delete
 - jobs/status: get
 - secrets: get, list, watch, create, update, patch, delete
-- leases: get, list, watch, create, update, patch, delete
 - events: create, patch
+
+# For future phases:
+- leases: get, list, watch, create, update, patch, delete
 - pods: get, list, watch (for pre-checks)
 - services: get, list, watch (for metric checks)
 - custom.metrics.k8s.io/*: get, list
 - external.metrics.k8s.io/*: get, list
 ```
 
-### Reconcile Logic (Current)
-1. Fetch DBUpgrade resource
-2. Check if spec changed (generation vs observedGeneration)
-3. Initialize/reset conditions
-4. Update status via patch
-
-### What's NOT Implemented Yet (Milestone 2)
-- ❌ Job creation for migrations
-- ❌ Secret management (RDS tokens, connection strings)
-- ❌ Pre-check execution
-- ❌ Post-check execution
-- ❌ Lease acquisition
-- ❌ Event emission
-- ❌ Status progression (Ready → Progressing → Ready)
+### What's NOT Implemented Yet
+- ❌ Pre-check execution (Phase 2B)
+- ❌ Post-check execution (Phase 2B)
+- ❌ Lease acquisition (Phase 2B)
+- ❌ AWS RDS/Aurora support (Phase 2C)
+- ❌ RDS IAM token generation (Phase 2C)
 
 ---
 
 ## 4. Testing Infrastructure
 
 ### Test Statistics
-- **Total tests**: 25 (all passing ✅)
-- **Unit tests**: 12
-- **Integration tests (envtest)**: 13
+- **Total tests**: 36 (all passing ✅)
+- **Webhook unit tests**: 12
+- **Webhook integration tests (envtest)**: 13
+- **Controller unit tests**: 4
+- **Controller integration tests (envtest)**: 7
 
-### Unit Tests (`dbupgrade_webhook_test.go` - 315 lines)
+### Controller Unit Tests (`controllers/dbupgrade_controller_test.go`)
+
+**Helper Function Tests (4 tests)**:
+- `TestComputeSpecHash`: Hash consistency and uniqueness
+- `TestIsJobRunning`: Nil job, active pods, no active pods
+- `TestIsJobSucceeded`: Nil job, succeeded, not succeeded, no conditions
+- `TestIsJobFailed`: Nil job, failed, not failed, no conditions
+
+### Controller Integration Tests (`controllers/dbupgrade_controller_envtest_test.go`)
+
+**Secret Validation (2 tests)**:
+- Should set Degraded when Secret is missing
+- Should create Job when Secret exists
+
+**Job Creation (2 tests)**:
+- Should create Job with init container + Atlas pattern
+- Should create operator-managed Secret
+
+**Job Status Synchronization (2 tests)**:
+- Should update Ready condition when Job succeeds
+- Should set Degraded when Job fails
+
+**Idempotency (1 test)**:
+- Should not create duplicate Jobs for same spec
+
+### Webhook Unit Tests (`api/v1alpha1/dbupgrade_webhook_test.go`)
 
 **Database Validation (4 tests)**:
 - Accept selfHosted with connection
@@ -202,7 +300,7 @@ ValidateDelete() (admission.Warnings, error)
 - Allow changing migrations.image
 - Allow changing migrations.dir
 
-### Integration Tests (`dbupgrade_webhook_envtest_test.go` - 351 lines)
+### Webhook Integration Tests (`api/v1alpha1/dbupgrade_webhook_envtest_test.go`)
 
 **Create Validation via API (5 tests)**:
 - Accept valid selfHosted DBUpgrade
@@ -223,13 +321,9 @@ ValidateDelete() (admission.Warnings, error)
 - Reject changing database.aws.host
 - Reject changing database.aws.dbName
 
-### Test Infrastructure (`suite_test.go` - 132 lines)
-- envtest environment setup
-- Kubernetes API server + etcd bootstrapping
-- Webhook server with TLS certificates
-- Manager startup and graceful shutdown
-- BeforeSuite/AfterSuite hooks
-- Timeout handling for webhook readiness
+### Test Infrastructure Files
+- `api/v1alpha1/suite_test.go` (132 lines): Webhook envtest setup
+- `controllers/suite_test.go` (106 lines): Controller envtest setup
 
 ### Running Tests
 ```bash
@@ -238,9 +332,9 @@ go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 setup-envtest use 1.29.0
 
 # Run all tests
-KUBEBUILDER_ASSETS="$(setup-envtest use 1.29.0 -p path)" go test ./api/v1alpha1 -v
+KUBEBUILDER_ASSETS="$(setup-envtest use 1.29.0 -p path)" go test ./... -v
 
-# Results: 25 Passed | 0 Failed
+# Results: 36 Passed | 0 Failed
 ```
 
 ---
@@ -275,7 +369,7 @@ metadata:
   name: dbupgrade-sample
 spec:
   migrations:
-    image: "postgres:15-migrations"
+    image: "myapp/migrations:v1"  # Just needs /migrations directory
     dir: "/migrations"
   database:
     type: "selfHosted"
@@ -285,7 +379,7 @@ spec:
         key: "url"
 ```
 
-**Example 2: AWS RDS with IAM Authentication**
+**Example 2: AWS RDS with IAM Authentication** (Phase 2C)
 ```yaml
 apiVersion: dbupgrade.subbug.learning/v1alpha1
 kind: DBUpgrade
@@ -369,11 +463,10 @@ dbupgrade_operator_up{} = 1
 
 ### README.md (318 lines)
 - Project overview
-- Milestone 1 status
+- Milestone status
 - Building and running instructions
 - API version details
 - Status and conditions explanation
-- Phase 0 controller behavior
 - Sample CRs
 - AWS RDS/Aurora authentication model
 - IAM setup requirements
@@ -381,69 +474,60 @@ dbupgrade_operator_up{} = 1
 - Immutability documentation
 - Observability section (health checks, metrics, monitoring)
 
+### MILESTONE_2A_PLAN.md (456 lines)
+- Detailed implementation plan for Phase 2A
+- User story and acceptance criteria
+- Implementation tasks with code snippets
+- Testing strategy
+- Manual testing guide
+
 ---
 
-## 9. What's Ready for Milestone 2
+## 9. Milestone Progress
 
-### ✅ Complete Foundation
+### ✅ Milestone 1 Complete
 1. **API fully defined**: All types, validation, immutability
 2. **Webhook validated**: 13 integration tests + 12 unit tests
 3. **RBAC configured**: All permissions for Jobs, Secrets, Leases, Events
 4. **Observability ready**: Metrics, health checks documented
-5. **Testing infrastructure**: envtest setup for controller testing
+5. **Testing infrastructure**: envtest setup for testing
 6. **Documentation complete**: README, validation rules, IAM model
 
-### 🎯 Milestone 2 Scope
+### ✅ Milestone 2A Complete (Self-Hosted DB)
+1. **Secret validation**: Validates customer's connection Secret
+2. **Unified Secret creation**: Operator-managed Secret for Job
+3. **Job creation**: Init container + Atlas CLI pattern
+4. **Job status monitoring**: Syncs Job status to conditions
+5. **Event emission**: Kubernetes Events for observability
+6. **Idempotent reconciliation**: No duplicate Jobs
+7. **Controller tests**: 4 unit + 7 envtest integration tests
 
-**Controller Implementation** will add:
+### 🎯 Milestone 2B (Next): Checks Implementation
+- Pre-checks (minPodVersions, metrics)
+- Post-checks (metrics)
+- Lease acquisition for single-writer guarantee
 
-1. **Job Management**:
-   - Create migration Job based on spec
-   - Monitor Job status
-   - Handle Job failures
-   - Clean up completed Jobs
+### 🎯 Milestone 2C: AWS RDS/Aurora Support
+- AWS SDK integration
+- RDS IAM token generation
+- Role assumption
 
-2. **Secret Management**:
-   - Generate RDS IAM tokens (AWS SDK)
-   - Create K8s Secrets with connection info
-   - Handle Secret rotation (15-min token expiry)
-   - Validate Secret existence for selfHosted
+---
 
-3. **Pre-Check Execution**:
-   - Validate min pod versions
-   - Query custom metrics (Pods, Object, External)
-   - Set Blocked condition if checks fail
-   - Prevent migration if blocked
-
-4. **Post-Check Execution**:
-   - Query metrics after migration
-   - Set Degraded if checks fail
-   - Allow rollback detection
-
-5. **Status Management**:
-   - Progress through states: Accepted → Progressing → Ready
-   - Update conditions based on Job status
-   - Emit Kubernetes Events for observability
-   - Handle error states gracefully
-
-6. **Lease Management**:
-   - Acquire lease before creating Job
-   - Ensure single-writer guarantee
-   - Release lease after Job completes
-
-### 📊 Current Code Statistics
+## 10. Code Statistics
 
 ```
-Total Go files: 13
-Total lines: ~2,400 (including tests)
+Total Go files: 17
+Total lines: ~3,800 (including tests)
 
 Breakdown:
 - API types: 456 lines (conditions.go + dbupgrade_types.go)
 - Webhook: 271 lines
-- Controller: 196 lines (Phase 0 skeleton)
+- Controller: 550+ lines (Milestone 2A complete)
 - Metrics: 30 lines
 - Main: 131 lines
-- Tests: 798 lines (unit + envtest + suite)
+- Controller tests: 480 lines (unit + envtest + suite)
+- Webhook tests: 798 lines (unit + envtest + suite)
 - Generated: 449 lines (DeepCopy)
 ```
 
@@ -461,42 +545,52 @@ Breakdown:
 - Ginkgo/Gomega (testing framework)
 
 ### 📈 Test Coverage
-- **api/v1alpha1**: 26.5% (webhook validation focused)
+- **Total tests**: 36 (all passing)
 - **Unit tests**: Fast (< 1ms per test)
 - **envtest tests**: Moderate (< 100ms per test)
-- **All tests**: Pass in ~7 seconds
+- **All tests**: Pass in ~17 seconds
 
 ---
 
-## 10. Git Repository Status
+## 11. Git Repository Status
 
-### Recent Commits (Last 5)
+### Recent Commits
 ```
-13d9e4c test(webhook): add envtest integration tests
-c63385b feat(webhook): add immutability validation and heartbeat metric
-dbc9fb3 refactor(api): simplify to operator-managed IAM, add validation and RBAC
-a82b5e6 fix(controller): reset Ready condition when spec changes
-3caee24 fix(api): clarify MetricCheck.Name requirements
+dcc7124 feat(controller): implement Milestone 2A - self-hosted DB migration support
+213dde9 docs: add Milestone 2A implementation plan for self-hosted DB support
+ff29038 docs: add comprehensive resource inventory for Milestone 1
 ```
 
 ### Branch: `main`
-- All Milestone 1 work merged
-- Clean working tree
-- Ready for Milestone 2 branch
+- Milestone 1 complete
+- Milestone 2A complete
+- Ready for E2E testing and Phase 2B
 
 ---
 
 ## Summary: Resource Checklist
 
+### Milestone 1
 - ✅ API types complete with validation
 - ✅ Webhook validation with immutability enforcement
-- ✅ 25 tests (unit + integration) all passing
+- ✅ 25 webhook tests (unit + integration) all passing
 - ✅ CRD, RBAC, webhook manifests generated
 - ✅ Sample CRs for selfHosted and AWS
 - ✅ Observability (metrics, health checks)
 - ✅ Documentation (README with examples)
 - ✅ Testing infrastructure (envtest setup)
-- ✅ Controller skeleton (Phase 0)
-- 🎯 Ready for Milestone 2: Controller implementation
 
-**Next**: Implement reconciliation logic to create Jobs, manage Secrets, execute checks, and update status.
+### Milestone 2A
+- ✅ Secret validation for customer connection Secret
+- ✅ Operator-managed Secret creation (unified codepath)
+- ✅ Job creation with init container + Atlas CLI pattern
+- ✅ Job status monitoring and condition sync
+- ✅ Event emission for observability
+- ✅ Idempotent reconciliation
+- ✅ 11 controller tests (4 unit + 7 envtest)
+- ✅ Controller watches Jobs for automatic reconciliation
+
+### Next Steps
+- 🎯 E2E testing with kind + PostgreSQL
+- 🎯 Phase 2B: Pre-checks and post-checks
+- 🎯 Phase 2C: AWS RDS/Aurora support
