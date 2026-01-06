@@ -1,0 +1,17 @@
+# E2E test configuration - disables webhooks
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: system
+namePrefix: automatic-db-upgrades-
+
+resources:
+- ../crd
+- ../rbac
+- ../manager
+
+patches:
+- path: disable-webhooks-patch.yaml
+  target:
+    kind: Deployment
+    name: controller-manager

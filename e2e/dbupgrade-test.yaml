@@ -1,0 +1,23 @@
+---
+# Test DBUpgrade CR for E2E testing
+apiVersion: dbupgrade.subbug.learning/v1alpha1
+kind: DBUpgrade
+metadata:
+  name: e2e-test-migration
+  namespace: default
+spec:
+  migrations:
+    # This image uses the internal registry DNS name accessible from inside the cluster
+    # The registry is connected to the kind network as 'kind-registry'
+    image: kind-registry:5000/sample-migrations:e2e
+    dir: /migrations
+
+  database:
+    type: selfHosted
+    connection:
+      urlSecretRef:
+        name: postgres-connection
+        key: DATABASE_URL
+
+  runner:
+    activeDeadlineSeconds: 300

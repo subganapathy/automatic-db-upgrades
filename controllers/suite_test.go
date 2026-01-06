@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	dbupgradev1alpha1 "github.com/subganapathy/automatic-db-upgrades/api/v1alpha1"
 )
@@ -84,6 +85,9 @@ var _ = BeforeSuite(func() {
 	// Start the controller manager
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: "0", // Disable metrics server in tests
+		},
 	})
 	Expect(err).ToNot(HaveOccurred())
 

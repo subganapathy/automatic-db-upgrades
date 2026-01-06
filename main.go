@@ -103,9 +103,14 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "DBUpgrade")
 		os.Exit(1)
 	}
-	if err = (&dbupgradev1alpha1.DBUpgrade{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "DBUpgrade")
-		os.Exit(1)
+	// Enable webhooks unless DISABLE_WEBHOOKS is set (useful for E2E testing without cert-manager)
+	if os.Getenv("DISABLE_WEBHOOKS") != "true" {
+		if err = (&dbupgradev1alpha1.DBUpgrade{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "DBUpgrade")
+			os.Exit(1)
+		}
+	} else {
+		setupLog.Info("webhooks disabled via DISABLE_WEBHOOKS env var")
 	}
 	//+kubebuilder:scaffold:builder
 

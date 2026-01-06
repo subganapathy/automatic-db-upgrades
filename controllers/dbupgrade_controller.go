@@ -467,7 +467,8 @@ func isJobFailed(job *batchv1.Job) bool {
 const (
 	// CraneImage is used to extract migrations from customer images
 	// crane is a tool for interacting with container registries
-	CraneImage = "gcr.io/go-containerregistry/crane:latest"
+	// We use the :debug tag which includes busybox (has sh, tar) instead of distroless
+	CraneImage = "gcr.io/go-containerregistry/crane:debug"
 
 	// AtlasImage is the official Atlas CLI image for running migrations
 	AtlasImage = "arigaio/atlas:latest"
@@ -501,7 +502,8 @@ func (r *DBUpgradeReconciler) createMigrationJob(ctx context.Context, dbUpgrade 
 	// Init container command: extract migrations from customer image using crane
 	// crane export exports image filesystem as tarball, tar extracts the migrations directory
 	// This works with distroless/scratch images since we don't run the customer image
-	initCommand := fmt.Sprintf(`crane export %s - | tar -xf - -C /shared %s`,
+	// --insecure allows pulling from HTTP registries (like local dev registries)
+	initCommand := fmt.Sprintf(`crane export --insecure %s - | tar -xf - -C /shared %s`,
 		dbUpgrade.Spec.Migrations.Image,
 		migrationsDir[1:]) // Remove leading slash for tar
 
@@ -553,11 +555,12 @@ func (r *DBUpgradeReconciler) createMigrationJob(ctx context.Context, dbUpgrade 
 						},
 					},
 					// Main container: run Atlas CLI migrations
+					// Note: Atlas image ENTRYPOINT is /atlas, so we use it directly
 					Containers: []corev1.Container{
 						{
 							Name:    "migrate",
 							Image:   AtlasImage,
-							Command: []string{"atlas", "migrate", "apply"},
+							Command: []string{"/atlas", "migrate", "apply"},
 							Args: []string{
 								"--dir", fmt.Sprintf("file:///migrations%s", migrationsDir),
 								"--url", "$(DATABASE_URL)",

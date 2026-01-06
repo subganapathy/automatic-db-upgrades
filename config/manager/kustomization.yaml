@@ -1,4 +1,8 @@
 resources:
 - manager.yaml
-# +kubebuilder:scaffold:managerconfig
-
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+- name: controller
+  newName: localhost:5001/dbupgrade-operator
+  newTag: e2e
