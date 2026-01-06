@@ -188,4 +188,128 @@ var _ = Describe("DBUpgrade Webhook", func() {
 			Expect(err).To(HaveOccurred())
 		})
 	})
+
+	Context("Immutability Validation", func() {
+		It("should reject changing database.type", func() {
+			old := &DBUpgrade{
+				Spec: DBUpgradeSpec{
+					Database: DatabaseSpec{
+						Type: DatabaseTypeSelfHosted,
+						Connection: &ConnectionSpec{
+							URLSecretRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "db-secret"},
+								Key:                  "url",
+							},
+						},
+					},
+				},
+			}
+
+			new := old.DeepCopy()
+			new.Spec.Database.Type = DatabaseTypeAWSRDS
+
+			err := new.validateImmutableFields(old)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("database.type is immutable"))
+		})
+
+		It("should reject changing database.connection.urlSecretRef", func() {
+			old := &DBUpgrade{
+				Spec: DBUpgradeSpec{
+					Database: DatabaseSpec{
+						Type: DatabaseTypeSelfHosted,
+						Connection: &ConnectionSpec{
+							URLSecretRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "db-secret"},
+								Key:                  "url",
+							},
+						},
+					},
+				},
+			}
+
+			new := old.DeepCopy()
+			new.Spec.Database.Connection.URLSecretRef.Name = "different-secret"
+
+			err := new.validateImmutableFields(old)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("database.connection.urlSecretRef is immutable"))
+		})
+
+		It("should reject changing database.aws.roleArn", func() {
+			old := &DBUpgrade{
+				Spec: DBUpgradeSpec{
+					Database: DatabaseSpec{
+						Type: DatabaseTypeAWSRDS,
+						AWS: &AWSSpec{
+							RoleArn:  "arn:aws:iam::123456789012:role/old-role",
+							Region:   "us-east-1",
+							Host:     "db.amazonaws.com",
+							Port:     5432,
+							DBName:   "testdb",
+							Username: "testuser",
+						},
+					},
+				},
+			}
+
+			new := old.DeepCopy()
+			new.Spec.Database.AWS.RoleArn = "arn:aws:iam::123456789012:role/new-role"
+
+			err := new.validateImmutableFields(old)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("database.aws.roleArn is immutable"))
+		})
+
+		It("should allow changing migrations.image", func() {
+			old := &DBUpgrade{
+				Spec: DBUpgradeSpec{
+					Migrations: MigrationsSpec{
+						Image: "myapp/migrations:v1.0.0",
+					},
+					Database: DatabaseSpec{
+						Type: DatabaseTypeSelfHosted,
+						Connection: &ConnectionSpec{
+							URLSecretRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "db-secret"},
+								Key:                  "url",
+							},
+						},
+					},
+				},
+			}
+
+			new := old.DeepCopy()
+			new.Spec.Migrations.Image = "myapp/migrations:v2.0.0"
+
+			err := new.validateImmutableFields(old)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should allow changing migrations.dir", func() {
+			old := &DBUpgrade{
+				Spec: DBUpgradeSpec{
+					Migrations: MigrationsSpec{
+						Image: "myapp/migrations:v1.0.0",
+						Dir:   "/old-migrations",
+					},
+					Database: DatabaseSpec{
+						Type: DatabaseTypeSelfHosted,
+						Connection: &ConnectionSpec{
+							URLSecretRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "db-secret"},
+								Key:                  "url",
+							},
+						},
+					},
+				},
+			}
+
+			new := old.DeepCopy()
+			new.Spec.Migrations.Dir = "/new-migrations"
+
+			err := new.validateImmutableFields(old)
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
 })

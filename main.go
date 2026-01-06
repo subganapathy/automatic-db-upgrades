@@ -35,6 +35,7 @@ import (
 
 	dbupgradev1alpha1 "github.com/subganapathy/automatic-db-upgrades/api/v1alpha1"
 	"github.com/subganapathy/automatic-db-upgrades/controllers"
+	appmetrics "github.com/subganapathy/automatic-db-upgrades/internal/metrics"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -116,6 +117,12 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
+
+	// Set the operator up metric to indicate successful initialization
+	// This metric is exposed at /metrics and should be scraped by Prometheus
+	// Absence of this metric indicates the operator process is dead
+	appmetrics.SetOperatorUp()
+	setupLog.Info("operator initialized successfully, heartbeat metric active")
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

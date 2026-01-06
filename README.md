@@ -214,6 +214,24 @@ The DBUpgrade webhook validates:
 - AWS configuration has all required fields when specified
 - Metric checks have matching target types (e.g., `type=Pods` requires `target.pods`)
 - Threshold values are valid Kubernetes Quantities
+- **Immutability**: Database configuration fields are immutable after creation
+
+### Immutability Rules
+
+Once a DBUpgrade resource is created, the following fields are **immutable** (cannot be changed):
+- `database.type` - Database type (selfHosted, awsRds, awsAurora)
+- `database.connection.urlSecretRef` - Secret reference for connection string
+- `database.aws.*` - All AWS configuration fields (roleArn, region, host, port, dbName, username)
+
+**Mutable fields** (can be updated after creation):
+- `migrations.image` - Migration container image
+- `migrations.dir` - Directory containing migrations
+- `checks.*` - Pre/post check configurations
+- `runner.activeDeadlineSeconds` - Job timeout
+
+**Rationale**: Database configuration identifies which database is being upgraded. Changing these fields would mean upgrading a different database, which should be a new DBUpgrade resource.
+
+**Note**: The webhook does NOT validate Secret existence (would add latency and require additional RBAC). The controller validates Secret existence at runtime and reports issues via the Degraded condition.
 
 ### Validation Examples
 
@@ -248,3 +266,57 @@ spec:
         name: db-secret
         key: url
 ```
+
+## Observability
+
+### Health Checks
+
+The operator exposes standard Kubernetes health probes:
+
+- **Liveness probe**: `http://localhost:8081/healthz`
+  - Used by Kubernetes to determine if the pod should be restarted
+  - Returns 200 OK when the operator process is healthy
+
+- **Readiness probe**: `http://localhost:8081/readyz`
+  - Used by Kubernetes to determine if the pod can receive traffic
+  - Returns 200 OK when the operator is ready to handle requests
+
+### Metrics
+
+The operator exposes Prometheus metrics at `http://localhost:8080/metrics`:
+
+- **`dbupgrade_operator_up`**: Heartbeat metric (gauge, always 1 when operator is running)
+  - Purpose: Monitor operator availability
+  - Alert on: Absence of this metric indicates the operator process is dead
+  - Example Prometheus alert:
+    ```yaml
+    - alert: DBUpgradeOperatorDown
+      expr: absent(dbupgrade_operator_up)
+      for: 5m
+      annotations:
+        summary: "DBUpgrade operator is down"
+    ```
+
+- **controller-runtime metrics**: Standard metrics for reconciliation, queue depth, errors, etc.
+
+### Monitoring Setup
+
+1. **Scrape configuration** (Prometheus ServiceMonitor):
+   ```yaml
+   apiVersion: monitoring.coreos.com/v1
+   kind: ServiceMonitor
+   metadata:
+     name: dbupgrade-operator
+   spec:
+     selector:
+       matchLabels:
+         app: dbupgrade-operator
+     endpoints:
+     - port: metrics
+       interval: 30s
+   ```
+
+2. **Alerting rules**:
+   - Alert on `absent(dbupgrade_operator_up)` for operator availability
+   - Alert on high `controller_runtime_reconcile_errors_total` for reconciliation failures
+   - Alert on `DBUpgrade` resources stuck in Degraded or Blocked conditions

@@ -42,6 +42,14 @@ func (r *DBUpgrade) ValidateCreate() (admission.Warnings, error) {
 
 // ValidateUpdate implements webhook.Validator
 func (r *DBUpgrade) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
+	oldDBUpgrade := old.(*DBUpgrade)
+
+	// Validate immutable fields
+	if err := r.validateImmutableFields(oldDBUpgrade); err != nil {
+		return nil, err
+	}
+
+	// Validate current state
 	return nil, r.validateDBUpgrade()
 }
 
@@ -74,6 +82,9 @@ func (r *DBUpgrade) validateDBUpgrade() error {
 }
 
 // validateDatabase ensures database configuration is valid
+// Note: We do NOT validate Secret existence here (would add latency and require
+// webhook to have Secret RBAC). The controller validates Secret existence and
+// reports issues via Degraded condition.
 func (r *DBUpgrade) validateDatabase() error {
 	dbType := r.Spec.Database.Type
 	hasAWS := r.Spec.Database.AWS != nil
@@ -191,6 +202,69 @@ func validateMetricCheck(m MetricCheck) error {
 	// Validate threshold value is not empty
 	if m.Threshold.Value.IsZero() {
 		return fmt.Errorf("threshold.value cannot be empty")
+	}
+
+	return nil
+}
+
+// validateImmutableFields ensures immutable fields haven't changed
+// Mutable fields: migrations.image, migrations.dir, checks, runner
+// Immutable fields: database.* (type, connection, aws)
+func (r *DBUpgrade) validateImmutableFields(old *DBUpgrade) error {
+	// Database type is immutable
+	if r.Spec.Database.Type != old.Spec.Database.Type {
+		return fmt.Errorf("database.type is immutable (cannot change from %s to %s)",
+			old.Spec.Database.Type, r.Spec.Database.Type)
+	}
+
+	// Connection secret reference is immutable
+	oldHasConnection := old.Spec.Database.Connection != nil && old.Spec.Database.Connection.URLSecretRef != nil
+	newHasConnection := r.Spec.Database.Connection != nil && r.Spec.Database.Connection.URLSecretRef != nil
+
+	if oldHasConnection != newHasConnection {
+		return fmt.Errorf("database.connection cannot be added or removed after creation")
+	}
+
+	if oldHasConnection && newHasConnection {
+		oldRef := old.Spec.Database.Connection.URLSecretRef
+		newRef := r.Spec.Database.Connection.URLSecretRef
+
+		if oldRef.Name != newRef.Name || oldRef.Key != newRef.Key {
+			return fmt.Errorf("database.connection.urlSecretRef is immutable (cannot change from %s/%s to %s/%s)",
+				oldRef.Name, oldRef.Key, newRef.Name, newRef.Key)
+		}
+	}
+
+	// AWS configuration is immutable
+	oldHasAWS := old.Spec.Database.AWS != nil
+	newHasAWS := r.Spec.Database.AWS != nil
+
+	if oldHasAWS != newHasAWS {
+		return fmt.Errorf("database.aws cannot be added or removed after creation")
+	}
+
+	if oldHasAWS && newHasAWS {
+		oldAWS := old.Spec.Database.AWS
+		newAWS := r.Spec.Database.AWS
+
+		if oldAWS.RoleArn != newAWS.RoleArn {
+			return fmt.Errorf("database.aws.roleArn is immutable")
+		}
+		if oldAWS.Region != newAWS.Region {
+			return fmt.Errorf("database.aws.region is immutable")
+		}
+		if oldAWS.Host != newAWS.Host {
+			return fmt.Errorf("database.aws.host is immutable")
+		}
+		if oldAWS.Port != newAWS.Port {
+			return fmt.Errorf("database.aws.port is immutable")
+		}
+		if oldAWS.DBName != newAWS.DBName {
+			return fmt.Errorf("database.aws.dbName is immutable")
+		}
+		if oldAWS.Username != newAWS.Username {
+			return fmt.Errorf("database.aws.username is immutable")
+		}
 	}
 
 	return nil
