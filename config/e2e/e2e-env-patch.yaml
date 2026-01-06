@@ -1,0 +1,20 @@
+# E2E test environment configuration
+# These settings are ONLY for local testing, never for production
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        env:
+        - name: DISABLE_WEBHOOKS
+          value: "true"
+        - name: ALLOW_INSECURE_REGISTRIES
+          value: "true"
+        # Use custom crane-tar image with pinned version (built by E2E script)
+        # Uses localhost:5001 which containerd mirrors to kind-registry:5000
+        - name: CRANE_IMAGE
+          value: "localhost:5001/crane-tar:e2e"

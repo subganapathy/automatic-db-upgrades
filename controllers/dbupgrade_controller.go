@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -464,15 +465,29 @@ func isJobFailed(job *batchv1.Job) bool {
 }
 
 // Container images used for migration Jobs
-const (
+var (
 	// CraneImage is used to extract migrations from customer images
 	// crane is a tool for interacting with container registries
-	// We use the :debug tag which includes busybox (has sh, tar) instead of distroless
-	CraneImage = "gcr.io/go-containerregistry/crane:debug"
+	// Default uses :debug tag (includes shell/tar). Override via CRANE_IMAGE env var
+	// for pinned versions or custom images in production.
+	CraneImage = getEnvOrDefault("CRANE_IMAGE", "gcr.io/go-containerregistry/crane:debug")
 
 	// AtlasImage is the official Atlas CLI image for running migrations
-	AtlasImage = "arigaio/atlas:latest"
+	// Override via ATLAS_IMAGE env var
+	AtlasImage = getEnvOrDefault("ATLAS_IMAGE", "arigaio/atlas:latest")
+
+	// AllowInsecureRegistries enables --insecure flag for crane when pulling from HTTP registries
+	// This should ONLY be enabled for local development/testing, never in production
+	// Set ALLOW_INSECURE_REGISTRIES=true to enable
+	AllowInsecureRegistries = os.Getenv("ALLOW_INSECURE_REGISTRIES") == "true"
 )
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 // createMigrationJob creates a Kubernetes Job to run database migrations
 // Architecture:
@@ -502,8 +517,13 @@ func (r *DBUpgradeReconciler) createMigrationJob(ctx context.Context, dbUpgrade 
 	// Init container command: extract migrations from customer image using crane
 	// crane export exports image filesystem as tarball, tar extracts the migrations directory
 	// This works with distroless/scratch images since we don't run the customer image
-	// --insecure allows pulling from HTTP registries (like local dev registries)
-	initCommand := fmt.Sprintf(`crane export --insecure %s - | tar -xf - -C /shared %s`,
+	insecureFlag := ""
+	if AllowInsecureRegistries {
+		// --insecure allows pulling from HTTP registries (only for local dev/testing)
+		insecureFlag = "--insecure "
+	}
+	initCommand := fmt.Sprintf(`crane export %s%s - | tar -xf - -C /shared %s`,
+		insecureFlag,
 		dbUpgrade.Spec.Migrations.Image,
 		migrationsDir[1:]) // Remove leading slash for tar
 

@@ -1,4 +1,6 @@
-# E2E test configuration - disables webhooks
+# E2E test configuration
+# - Disables webhooks (no TLS certs in kind)
+# - Enables insecure registries (local HTTP registry)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -11,7 +13,7 @@ resources:
 - ../manager
 
 patches:
-- path: disable-webhooks-patch.yaml
+- path: e2e-env-patch.yaml
   target:
     kind: Deployment
     name: controller-manager

@@ -24,6 +24,7 @@ REGISTRY_PORT="5001"
 # Image names (using local registry)
 OPERATOR_IMG="localhost:${REGISTRY_PORT}/dbupgrade-operator:e2e"
 MIGRATIONS_IMG="localhost:${REGISTRY_PORT}/sample-migrations:e2e"
+CRANE_TAR_IMG="localhost:${REGISTRY_PORT}/crane-tar:e2e"
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -133,6 +134,22 @@ deploy_postgres() {
     kubectl wait --for=condition=Ready pod -l app=postgres -n postgres --timeout=60s
 
     log_info "PostgreSQL deployed successfully"
+}
+
+# Build and push custom crane-tar image (pinned version, minimal)
+build_crane_tar_image() {
+    log_info "Building crane-tar image (pinned crane version)..."
+
+    local INTERNAL_IMG="kind-registry:5000/crane-tar:e2e"
+    docker build --provenance=false -t "${INTERNAL_IMG}" "${PROJECT_ROOT}/images/crane-tar"
+
+    # Tag for localhost access (for pushing)
+    docker tag "${INTERNAL_IMG}" "${CRANE_TAR_IMG}"
+
+    log_info "Pushing crane-tar image to local registry..."
+    docker push "${CRANE_TAR_IMG}"
+
+    log_info "crane-tar image pushed successfully"
 }
 
 # Build and push sample migrations image to local registry
@@ -314,6 +331,7 @@ main() {
     create_registry
     create_cluster
     deploy_postgres
+    build_crane_tar_image
     build_migrations_image
     deploy_operator
     create_test_resources
