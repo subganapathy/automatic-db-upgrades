@@ -156,10 +156,10 @@ build_crane_tar_image() {
 build_migrations_image() {
     log_info "Building sample migrations image..."
 
-    # Build without provenance/attestation (which causes issues with crane export)
-    # Use explicit linux/arm64 platform for M1 Macs
+    # Docker buildx may add provenance/attestation manifests which create multi-manifest images
+    # The operator handles this via --platform flag in crane export (dynamic arch detection)
     local INTERNAL_IMG="kind-registry:5000/sample-migrations:e2e"
-    docker build --provenance=false -t "${INTERNAL_IMG}" "${SCRIPT_DIR}/sample-migrations"
+    docker build -t "${INTERNAL_IMG}" "${SCRIPT_DIR}/sample-migrations"
 
     # Tag for localhost access (for pushing)
     docker tag "${INTERNAL_IMG}" "${MIGRATIONS_IMG}"

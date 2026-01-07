@@ -517,12 +517,16 @@ func (r *DBUpgradeReconciler) createMigrationJob(ctx context.Context, dbUpgrade 
 	// Init container command: extract migrations from customer image using crane
 	// crane export exports image filesystem as tarball, tar extracts the migrations directory
 	// This works with distroless/scratch images since we don't run the customer image
+	//
+	// --platform flag handles images built with Docker buildx provenance/attestation
+	// which creates multi-manifest images. We detect arch at runtime via uname.
 	insecureFlag := ""
 	if AllowInsecureRegistries {
 		// --insecure allows pulling from HTTP registries (only for local dev/testing)
 		insecureFlag = "--insecure "
 	}
-	initCommand := fmt.Sprintf(`crane export %s%s - | tar -xf - -C /shared %s`,
+	// Detect platform dynamically: uname -m returns x86_64 or aarch64, convert to Docker format
+	initCommand := fmt.Sprintf(`crane export %s--platform linux/$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') %s - | tar -xf - -C /shared %s`,
 		insecureFlag,
 		dbUpgrade.Spec.Migrations.Image,
 		migrationsDir[1:]) // Remove leading slash for tar
