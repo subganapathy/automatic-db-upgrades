@@ -196,8 +196,25 @@ func (r *DBUpgradeReconciler) reconcileDBUpgrade(ctx context.Context, dbUpgrade 
 	expectedJobName := fmt.Sprintf("dbupgrade-%s-%s", dbUpgrade.Name, currentHash)
 
 	if existingJob != nil && existingJob.Name != expectedJobName {
-		// Spec changed - delete stale Job
-		logger.Info("Spec changed, deleting stale Job", "oldJob", existingJob.Name, "expectedJob", expectedJobName)
+		// Spec changed while Job exists from previous spec
+
+		// Don't delete running Jobs - wait for completion to avoid partial migration state
+		if isJobRunning(existingJob) {
+			logger.Info("Spec changed but migration is running, waiting for completion",
+				"oldJob", existingJob.Name, "expectedJob", expectedJobName)
+			return reconcileResult{
+				ready:           false,
+				readyReason:     dbupgradev1alpha1.ReasonInitializing,
+				readyMessage:    "Waiting for current migration to complete",
+				progressing:     true,
+				progressReason:  dbupgradev1alpha1.ReasonMigrationInProgress,
+				progressMessage: "Cannot apply new spec while migration is running",
+				requeueAfter:    10 * time.Second,
+			}
+		}
+
+		// Job is not running (completed or failed) - safe to delete
+		logger.Info("Spec changed, deleting completed Job", "oldJob", existingJob.Name, "expectedJob", expectedJobName)
 
 		// Delete the old Job (propagation policy deletes pods too)
 		propagation := metav1.DeletePropagationBackground
@@ -221,9 +238,9 @@ func (r *DBUpgradeReconciler) reconcileDBUpgrade(ctx context.Context, dbUpgrade 
 			readyMessage:    "Spec changed, preparing new migration",
 			progressing:     false,
 			progressReason:  dbupgradev1alpha1.ReasonInitializing,
-			progressMessage: "Deleted stale Job, will create new one",
+			progressMessage: "Deleted old Job, will create new one",
 			requeueAfter:    2 * time.Second,
-			event:           &eventInfo{corev1.EventTypeNormal, "SpecChanged", "Spec changed, restarting migration"},
+			event:           &eventInfo{corev1.EventTypeNormal, "SpecChanged", "Spec changed, starting new migration"},
 		}
 	}
 
