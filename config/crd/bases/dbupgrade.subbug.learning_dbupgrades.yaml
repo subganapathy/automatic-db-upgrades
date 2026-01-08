@@ -17,22 +17,21 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Ready condition
+    - description: Migration completed successfully
       jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
-    - description: Progressing condition
+    - description: Migration in progress
       jsonPath: .status.conditions[?(@.type=="Progressing")].status
       name: Progressing
       type: string
-    - description: Degraded condition
-      jsonPath: .status.conditions[?(@.type=="Degraded")].status
-      name: Degraded
+    - description: Current state reason
+      jsonPath: .status.conditions[?(@.type=="Progressing")].reason
+      name: Reason
       type: string
-    - description: Most recent spec generation observed
-      jsonPath: .status.observedGeneration
-      name: ObservedGen
-      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:

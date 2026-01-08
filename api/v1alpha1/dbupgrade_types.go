@@ -341,27 +341,29 @@ type DBUpgradeStatus struct {
 type DBUpgradeConditionType string
 
 const (
-	// DBUpgradeConditionReady indicates the DBUpgrade is ready
-	DBUpgradeConditionReady DBUpgradeConditionType = "Ready"
+	// ConditionReady indicates the migration has completed successfully for the current spec.
+	// Ready=True means the database schema matches the desired state.
+	ConditionReady DBUpgradeConditionType = "Ready"
 
-	// DBUpgradeConditionProgressing indicates the DBUpgrade is progressing
-	DBUpgradeConditionProgressing DBUpgradeConditionType = "Progressing"
-
-	// DBUpgradeConditionBlocked indicates the DBUpgrade is blocked (precheck gate is currently failing).
-	// When Blocked=True: Progressing must be False, Ready must be False.
-	DBUpgradeConditionBlocked DBUpgradeConditionType = "Blocked"
-
-	// DBUpgradeConditionDegraded indicates the DBUpgrade is degraded
-	DBUpgradeConditionDegraded DBUpgradeConditionType = "Degraded"
+	// ConditionProgressing indicates a migration is currently in progress.
+	// When Progressing=False and Ready=False, check the Reason for why:
+	// - Initializing: No migration started yet
+	// - JobFailed: Migration job failed
+	// - PreCheckImageVersionFailed: Image version precheck failed
+	// - PreCheckMetricFailed: Metric precheck failed
+	// - PostCheckFailed: Post-migration check failed
+	// - SecretNotFound: Database connection secret not found
+	// - AWSNotSupported: AWS RDS/Aurora not yet implemented
+	ConditionProgressing DBUpgradeConditionType = "Progressing"
 )
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=dbu
-//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description="Ready condition"
-//+kubebuilder:printcolumn:name="Progressing",type=string,JSONPath=".status.conditions[?(@.type==\"Progressing\")].status",description="Progressing condition"
-//+kubebuilder:printcolumn:name="Degraded",type=string,JSONPath=".status.conditions[?(@.type==\"Degraded\")].status",description="Degraded condition"
-//+kubebuilder:printcolumn:name="ObservedGen",type=integer,JSONPath=".status.observedGeneration",description="Most recent spec generation observed"
+//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description="Migration completed successfully"
+//+kubebuilder:printcolumn:name="Progressing",type=string,JSONPath=".status.conditions[?(@.type==\"Progressing\")].status",description="Migration in progress"
+//+kubebuilder:printcolumn:name="Reason",type=string,JSONPath=".status.conditions[?(@.type==\"Progressing\")].reason",description="Current state reason"
+//+kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
 // DBUpgrade is the Schema for the dbupgrades API
 type DBUpgrade struct {

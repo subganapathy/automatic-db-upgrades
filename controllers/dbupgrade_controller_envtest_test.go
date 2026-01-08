@@ -38,7 +38,7 @@ var _ = Describe("DBUpgrade Controller", func() {
 	)
 
 	Context("Secret Validation", func() {
-		It("should set Degraded when Secret is missing", func() {
+		It("should set SecretNotFound reason when Secret is missing", func() {
 			dbUpgrade := &dbupgradev1alpha1.DBUpgrade{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-missing-secret",
@@ -64,14 +64,16 @@ var _ = Describe("DBUpgrade Controller", func() {
 
 			Expect(k8sClient.Create(ctx, dbUpgrade)).To(Succeed())
 
-			// Wait for Degraded condition to be set
+			// Wait for Progressing=False with Reason=SecretNotFound
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(dbUpgrade), dbUpgrade)
 				if err != nil {
 					return false
 				}
 				for _, cond := range dbUpgrade.Status.Conditions {
-					if cond.Type == string(dbupgradev1alpha1.ConditionDegraded) && cond.Status == metav1.ConditionTrue {
+					if cond.Type == string(dbupgradev1alpha1.ConditionProgressing) &&
+						cond.Status == metav1.ConditionFalse &&
+						cond.Reason == dbupgradev1alpha1.ReasonSecretNotFound {
 						return true
 					}
 				}
@@ -390,7 +392,7 @@ var _ = Describe("DBUpgrade Controller", func() {
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 
-		It("should set Degraded when Job fails", func() {
+		It("should set JobFailed reason when Job fails", func() {
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-job-failed-secret",
@@ -457,7 +459,7 @@ var _ = Describe("DBUpgrade Controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, createdJob)).To(Succeed())
 
-			// Wait for Degraded condition to be True
+			// Wait for Progressing=False with Reason=JobFailed
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, types.NamespacedName{
 					Name:      dbUpgrade.Name,
@@ -467,7 +469,9 @@ var _ = Describe("DBUpgrade Controller", func() {
 					return false
 				}
 				for _, cond := range dbUpgrade.Status.Conditions {
-					if cond.Type == string(dbupgradev1alpha1.ConditionDegraded) && cond.Status == metav1.ConditionTrue {
+					if cond.Type == string(dbupgradev1alpha1.ConditionProgressing) &&
+						cond.Status == metav1.ConditionFalse &&
+						cond.Reason == dbupgradev1alpha1.ReasonJobFailed {
 						return true
 					}
 				}
