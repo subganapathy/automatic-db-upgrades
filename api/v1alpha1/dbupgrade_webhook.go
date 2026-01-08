@@ -18,7 +18,9 @@ package v1alpha1
 
 import (
 	"fmt"
+	"reflect"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -43,6 +45,11 @@ func (r *DBUpgrade) ValidateCreate() (admission.Warnings, error) {
 // ValidateUpdate implements webhook.Validator
 func (r *DBUpgrade) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	oldDBUpgrade := old.(*DBUpgrade)
+
+	// Block spec changes while migration is running
+	if err := r.validateNotProgressing(oldDBUpgrade); err != nil {
+		return nil, err
+	}
 
 	// Validate immutable fields
 	if err := r.validateImmutableFields(oldDBUpgrade); err != nil {
@@ -202,6 +209,25 @@ func validateMetricCheck(m MetricCheck) error {
 	// Validate threshold value is not empty
 	if m.Threshold.Value.IsZero() {
 		return fmt.Errorf("threshold.value cannot be empty")
+	}
+
+	return nil
+}
+
+// validateNotProgressing blocks spec changes while a migration is running.
+// This prevents partial migration state where a migration is interrupted.
+// Note: The controller also has this guard for defense in depth.
+func (r *DBUpgrade) validateNotProgressing(old *DBUpgrade) error {
+	// Only block if spec actually changed (allow metadata/status-only updates)
+	if reflect.DeepEqual(old.Spec, r.Spec) {
+		return nil
+	}
+
+	// Check if migration is in progress
+	for _, cond := range old.Status.Conditions {
+		if cond.Type == string(ConditionProgressing) && cond.Status == metav1.ConditionTrue {
+			return fmt.Errorf("cannot update spec while migration is in progress (Progressing=True); wait for current migration to complete")
+		}
 	}
 
 	return nil
