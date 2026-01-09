@@ -566,6 +566,58 @@ groups:
 | `aws.enabled` | Enable AWS IAM authentication | `false` |
 | `aws.region` | AWS region | `""` |
 
+### Optional Dependencies
+
+The Helm chart includes optional dependencies that can be enabled as needed:
+
+| Dependency | Purpose | Enable With |
+|------------|---------|-------------|
+| **cert-manager** | TLS certificates for webhook | `certManager.install=true` (default) |
+| **prometheus-adapter** | Metric-based pre/post checks | `prometheusAdapter.enabled=true` |
+| **YACE** | Export AWS RDS metrics to Prometheus | `yace.enabled=true` |
+
+#### cert-manager
+
+Installed by default. If you already have cert-manager in your cluster:
+
+```bash
+helm install dbupgrade-operator oci://ghcr.io/subganapathy/automatic-db-upgrades/dbupgrade-operator \
+  --set certManager.install=false
+```
+
+#### prometheus-adapter (for metric checks)
+
+Enable if using `spec.checks.pre.metrics` or `spec.checks.post.metrics`:
+
+```bash
+helm install dbupgrade-operator oci://ghcr.io/subganapathy/automatic-db-upgrades/dbupgrade-operator \
+  --set prometheusAdapter.enabled=true \
+  --set prometheusAdapter.prometheus.url=http://prometheus.monitoring.svc
+```
+
+#### YACE (for AWS RDS metrics)
+
+Enable if using RDS CloudWatch metrics in checks:
+
+```bash
+helm install dbupgrade-operator oci://ghcr.io/subganapathy/automatic-db-upgrades/dbupgrade-operator \
+  --set yace.enabled=true \
+  --set yace.aws.role=arn:aws:iam::123456789012:role/cloudwatch-reader
+```
+
+#### Full AWS Setup Example
+
+For AWS RDS with IAM auth and CloudWatch metrics:
+
+```bash
+helm install dbupgrade-operator oci://ghcr.io/subganapathy/automatic-db-upgrades/dbupgrade-operator \
+  --namespace dbupgrade-system --create-namespace \
+  --set aws.enabled=true \
+  --set aws.region=us-east-1 \
+  --set yace.enabled=true \
+  --set prometheusAdapter.enabled=true
+```
+
 ## Development
 
 ### Prerequisites

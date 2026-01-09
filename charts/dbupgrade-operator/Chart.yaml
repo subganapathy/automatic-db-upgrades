@@ -17,3 +17,26 @@ sources:
   - https://github.com/subganapathy/automatic-db-upgrades
 maintainers:
   - name: subganapathy
+
+dependencies:
+  # cert-manager: Install if not already available in cluster
+  # Set certManager.install=false if you already have cert-manager
+  - name: cert-manager
+    version: "v1.14.5"
+    repository: https://charts.jetstack.io
+    condition: certManager.install
+
+  # prometheus-adapter: Required for metric-based pre/post checks
+  # Enable with prometheusAdapter.enabled=true
+  - name: prometheus-adapter
+    version: "4.10.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheusAdapter.enabled
+
+  # YACE (Yet Another CloudWatch Exporter): Export AWS RDS metrics to Prometheus
+  # Enable with yace.enabled=true
+  - name: yet-another-cloudwatch-exporter
+    version: "0.38.0"
+    repository: https://nerdswords.github.io/helm-charts
+    alias: yace
+    condition: yace.enabled

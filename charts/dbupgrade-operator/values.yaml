@@ -81,3 +81,68 @@ aws:
   # Optional: ServiceAccount annotations for IRSA
   serviceAccountAnnotations: {}
     # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/dbupgrade-operator
+
+# =============================================================================
+# Optional Dependencies
+# =============================================================================
+
+# cert-manager: Required for webhook TLS certificates
+# Set install=false if cert-manager is already installed in your cluster
+certManager:
+  install: true  # Set to false if cert-manager already exists
+  # cert-manager subchart values (when install=true)
+  # See: https://artifacthub.io/packages/helm/cert-manager/cert-manager
+  installCRDs: true
+  # Reduce resource usage for smaller clusters
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+# prometheus-adapter: Required for metric-based pre/post checks
+# Enables querying pod/external metrics via Kubernetes metrics API
+prometheusAdapter:
+  enabled: false  # Set to true if using metric checks
+  # prometheus-adapter subchart values (when enabled=true)
+  # See: https://artifacthub.io/packages/helm/prometheus-community/prometheus-adapter
+  prometheus:
+    url: http://prometheus.monitoring.svc
+    port: 9090
+  # Example rules for HTTP metrics (customize for your workloads)
+  rules:
+    custom:
+      - seriesQuery: 'http_requests_total{namespace!="",pod!=""}'
+        resources:
+          overrides:
+            namespace: {resource: "namespace"}
+            pod: {resource: "pod"}
+        name:
+          matches: "^(.*)_total$"
+          as: "${1}_per_second"
+        metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[2m])) by (<<.GroupBy>>)'
+
+# YACE (Yet Another CloudWatch Exporter): Export AWS CloudWatch metrics to Prometheus
+# Required for RDS metric checks (CPU, connections, latency)
+yace:
+  enabled: false  # Set to true if using AWS RDS metric checks
+  # YACE subchart values (when enabled=true)
+  # See: https://github.com/nerdswords/helm-charts/tree/master/charts/yet-another-cloudwatch-exporter
+  aws:
+    role: ""  # IAM role ARN for CloudWatch access
+  config: |
+    discovery:
+      jobs:
+        - type: rds
+          regions:
+            - us-east-1
+          metrics:
+            - name: DatabaseConnections
+              statistics: [Average, Maximum]
+            - name: CPUUtilization
+              statistics: [Average, Maximum]
+            - name: FreeableMemory
+              statistics: [Average, Minimum]
+            - name: ReadLatency
+              statistics: [Average, Maximum]
+            - name: WriteLatency
+              statistics: [Average, Maximum]

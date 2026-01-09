@@ -19,3 +19,6 @@ cover.out
 # Envtest assets downloaded by setup-envtest (these are huge)
 bin/k8s/
 
+# Helm chart dependencies (downloaded via helm dep update)
+charts/dbupgrade-operator/charts/
+charts/dbupgrade-operator/Chart.lock
