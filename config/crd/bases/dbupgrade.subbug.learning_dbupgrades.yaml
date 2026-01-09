@@ -695,6 +695,13 @@ spec:
                                   type: object
                               type: object
                               x-kubernetes-map-type: atomic
+                            strictMode:
+                              default: true
+                              description: |-
+                                StrictMode controls behavior when pods have non-semver image tags.
+                                When true (default): non-semver pods cause check failure.
+                                When false: non-semver pods are skipped (not counted as pass or fail).
+                              type: boolean
                           required:
                           - minVersion
                           - selector
@@ -875,6 +882,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              jobCompletedAt:
+                description: |-
+                  JobCompletedAt records when the migration job completed successfully.
+                  Used for baketime calculation in post-checks.
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration reflects the generation of the most
                   recently observed DBUpgrade

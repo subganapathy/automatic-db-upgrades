@@ -19,7 +19,9 @@ package v1alpha1
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -74,8 +76,14 @@ func (r *DBUpgrade) validateDBUpgrade() error {
 		allErrs = append(allErrs, err)
 	}
 
-	// Validate cross-field constraints for metrics
+	// Validate checks configuration
 	if r.Spec.Checks != nil {
+		// Validate minPodVersions
+		if err := r.validateMinPodVersions(); err != nil {
+			allErrs = append(allErrs, err)
+		}
+
+		// Validate cross-field constraints for metrics
 		if err := r.validateMetrics(); err != nil {
 			allErrs = append(allErrs, err)
 		}
@@ -85,6 +93,18 @@ func (r *DBUpgrade) validateDBUpgrade() error {
 		return fmt.Errorf("validation failed: %v", allErrs)
 	}
 
+	return nil
+}
+
+// validateMinPodVersions validates minPodVersion checks
+func (r *DBUpgrade) validateMinPodVersions() error {
+	for i, check := range r.Spec.Checks.Pre.MinPodVersions {
+		// Validate minVersion is valid semver
+		_, err := semver.NewVersion(strings.TrimPrefix(check.MinVersion, "v"))
+		if err != nil {
+			return fmt.Errorf("checks.pre.minPodVersions[%d].minVersion %q is not valid semver: %w", i, check.MinVersion, err)
+		}
+	}
 	return nil
 }
 

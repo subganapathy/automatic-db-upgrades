@@ -20,6 +20,8 @@ type VersionCheckResult struct {
 	Message string
 	// FailedPods contains pods that failed the check (if any)
 	FailedPods []PodVersionInfo
+	// SkippedPods contains pods that were skipped due to non-semver tags (when strictMode=false)
+	SkippedPods []PodVersionInfo
 }
 
 // PodVersionInfo contains version info for a single pod
@@ -75,7 +77,15 @@ func checkSinglePodVersion(ctx context.Context, c client.Client, namespace strin
 		return nil, fmt.Errorf("invalid minimum version %q: %w", check.MinVersion, err)
 	}
 
+	// Determine strictMode (defaults to true if not specified)
+	strictMode := true
+	if check.StrictMode != nil {
+		strictMode = *check.StrictMode
+	}
+
 	var failedPods []PodVersionInfo
+	var skippedPods []PodVersionInfo
+	checkedCount := 0
 
 	for _, pod := range podList.Items {
 		// Find the container to check
@@ -86,41 +96,52 @@ func checkSinglePodVersion(ctx context.Context, c client.Client, namespace strin
 				continue
 			}
 
+			podInfo := PodVersionInfo{
+				Name:          pod.Name,
+				Namespace:     pod.Namespace,
+				ContainerName: container.Name,
+				ImageTag:      container.Image,
+			}
+
 			// Extract version from image tag
 			imageVersion := extractVersionFromImage(container.Image)
 			if imageVersion == "" {
-				failedPods = append(failedPods, PodVersionInfo{
-					Name:          pod.Name,
-					Namespace:     pod.Namespace,
-					ContainerName: container.Name,
-					ImageTag:      container.Image,
-					Version:       "unknown",
-				})
+				podInfo.Version = "unknown"
+				if strictMode {
+					// In strict mode, non-semver is a failure
+					failedPods = append(failedPods, podInfo)
+				} else {
+					// In non-strict mode, skip non-semver pods
+					skippedPods = append(skippedPods, podInfo)
+				}
+				if check.ContainerName != "" {
+					break
+				}
 				continue
 			}
 
 			podVersion, err := semver.NewVersion(strings.TrimPrefix(imageVersion, "v"))
 			if err != nil {
-				// If we can't parse the version, treat as failure
-				failedPods = append(failedPods, PodVersionInfo{
-					Name:          pod.Name,
-					Namespace:     pod.Namespace,
-					ContainerName: container.Name,
-					ImageTag:      container.Image,
-					Version:       imageVersion,
-				})
+				podInfo.Version = imageVersion
+				if strictMode {
+					// In strict mode, unparseable version is a failure
+					failedPods = append(failedPods, podInfo)
+				} else {
+					// In non-strict mode, skip unparseable versions
+					skippedPods = append(skippedPods, podInfo)
+				}
+				if check.ContainerName != "" {
+					break
+				}
 				continue
 			}
 
+			podInfo.Version = imageVersion
+			checkedCount++
+
 			// Check if version meets minimum
 			if podVersion.LessThan(minVersion) {
-				failedPods = append(failedPods, PodVersionInfo{
-					Name:          pod.Name,
-					Namespace:     pod.Namespace,
-					ContainerName: container.Name,
-					ImageTag:      container.Image,
-					Version:       imageVersion,
-				})
+				failedPods = append(failedPods, podInfo)
 			}
 
 			// If containerName was specified, we found it - stop checking other containers
@@ -131,16 +152,35 @@ func checkSinglePodVersion(ctx context.Context, c client.Client, namespace strin
 	}
 
 	if len(failedPods) > 0 {
+		msg := fmt.Sprintf("%d pod(s) have version below minimum %s", len(failedPods), check.MinVersion)
+		if len(skippedPods) > 0 {
+			msg += fmt.Sprintf(" (%d skipped due to non-semver tags)", len(skippedPods))
+		}
 		return &VersionCheckResult{
-			Passed:     false,
-			Message:    fmt.Sprintf("%d pod(s) have version below minimum %s", len(failedPods), check.MinVersion),
-			FailedPods: failedPods,
+			Passed:      false,
+			Message:     msg,
+			FailedPods:  failedPods,
+			SkippedPods: skippedPods,
 		}, nil
 	}
 
+	// If all pods were skipped and none were checked, that's suspicious
+	if checkedCount == 0 && len(skippedPods) > 0 {
+		return &VersionCheckResult{
+			Passed:      false,
+			Message:     fmt.Sprintf("No pods with semver tags found (%d skipped); cannot validate versions", len(skippedPods)),
+			SkippedPods: skippedPods,
+		}, nil
+	}
+
+	msg := fmt.Sprintf("All %d pod(s) meet minimum version %s", checkedCount, check.MinVersion)
+	if len(skippedPods) > 0 {
+		msg += fmt.Sprintf(" (%d skipped due to non-semver tags)", len(skippedPods))
+	}
 	return &VersionCheckResult{
-		Passed:  true,
-		Message: fmt.Sprintf("All %d pod(s) meet minimum version %s", len(podList.Items), check.MinVersion),
+		Passed:      true,
+		Message:     msg,
+		SkippedPods: skippedPods,
 	}, nil
 }
 

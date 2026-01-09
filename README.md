@@ -81,7 +81,9 @@ spec:
 
 ### Pod Version Validation
 
-Block migrations until all pods are running the required version:
+Block migrations until all pods are running the required version.
+
+**Important**: Both `minVersion` and your container image tags must follow [Semantic Versioning](https://semver.org/) (e.g., `1.2.3`, `v2.0.0`, `1.0.0-rc1`). Non-semver tags like `latest`, `alpine`, or `sha256:...` will cause the check to fail by default (see `strictMode`).
 
 ```yaml
 spec:
@@ -91,9 +93,15 @@ spec:
         - selector:
             matchLabels:
               app: myapp
-          minVersion: "2.0.0"
-          containerName: myapp  # optional
+          minVersion: "2.0.0"      # Must be valid semver
+          containerName: myapp     # optional, checks all containers if omitted
+          strictMode: true         # default: true, fails on non-semver tags
 ```
+
+| Field | Description |
+|-------|-------------|
+| `minVersion` | Required semver version (e.g., `1.2.3`, `v2.0.0`) |
+| `strictMode` | `true` (default): non-semver pods fail the check. `false`: non-semver pods are skipped |
 
 ### Metric Validation
 
@@ -178,13 +186,95 @@ rules:
         matches: ".*"
         as: "http_request_latency_p99"
       metricsQuery: 'histogram_quantile(0.99, sum(rate(<<.Series>>{<<.LabelMatchers>>}[5m])) by (le, <<.GroupBy>>))'
+
+  # External metrics (for RDS CloudWatch metrics via YACE or cloudwatch-exporter)
+  external:
+    - seriesQuery: 'aws_rds_database_connections_average'
+      resources: {}
+      name:
+        matches: "^aws_rds_(.*)$"
+        as: "rds_$1"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+
+    - seriesQuery: 'aws_rds_cpuutilization_average'
+      resources: {}
+      name:
+        matches: "^aws_rds_(.*)$"
+        as: "rds_$1"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+```
+
+### Using RDS CloudWatch Metrics
+
+To use RDS metrics in pre/post checks, you need to export CloudWatch metrics to Prometheus using [YACE (Yet Another CloudWatch Exporter)](https://github.com/nerdswords/yet-another-cloudwatch-exporter) or [cloudwatch-exporter](https://github.com/prometheus/cloudwatch_exporter).
+
+Example YACE configuration for RDS:
+
+```yaml
+# yace-config.yaml
+discovery:
+  jobs:
+    - type: rds
+      regions: [us-east-1]
+      metrics:
+        - name: DatabaseConnections
+          statistics: [Average, Maximum]
+        - name: CPUUtilization
+          statistics: [Average, Maximum]
+        - name: FreeableMemory
+          statistics: [Average, Minimum]
+        - name: ReadLatency
+          statistics: [Average, Maximum]
+        - name: WriteLatency
+          statistics: [Average, Maximum]
+```
+
+Then use external metrics in your DBUpgrade:
+
+```yaml
+spec:
+  checks:
+    pre:
+      metrics:
+        - name: rds-cpu-check
+          metricName: rds_cpuutilization_average
+          source: External
+          target:
+            type: External
+            external:
+              selector:
+                matchLabels:
+                  dbinstance_identifier: mydb
+          threshold:
+            operator: "<"
+            value: "80"  # CPU < 80% before migration
+          reduce: Max
+    post:
+      metrics:
+        - name: rds-connections-check
+          metricName: rds_database_connections_average
+          source: External
+          target:
+            type: External
+            external:
+              selector:
+                matchLabels:
+                  dbinstance_identifier: mydb
+          threshold:
+            operator: ">"
+            value: "0"  # Ensure connections are restored
+          reduce: Min
+          bakeSeconds: 120  # Wait 2 min after migration
 ```
 
 ### 3. Verify Metrics Are Available
 
 ```bash
-# Check custom metrics API
+# Check custom metrics API (pod metrics)
 kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta2/namespaces/default/pods/*/http_errors_per_second"
+
+# Check external metrics API (RDS metrics)
+kubectl get --raw "/apis/external.metrics.k8s.io/v1beta1/namespaces/default/rds_cpuutilization_average?labelSelector=dbinstance_identifier=mydb"
 ```
 
 ## Status and Conditions

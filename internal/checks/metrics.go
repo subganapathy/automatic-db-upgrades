@@ -3,7 +3,6 @@ package checks
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,21 +70,10 @@ func NewMetricsChecker(config *rest.Config) (*MetricsChecker, error) {
 }
 
 // CheckMetrics validates metrics against their thresholds
-func (m *MetricsChecker) CheckMetrics(ctx context.Context, namespace string, checks []dbupgradev1alpha1.MetricCheck, checkType string) (*MetricCheckResult, error) {
-	logger := log.FromContext(ctx)
-
+// Note: BakeSeconds is handled at the controller level using status timestamps,
+// not via blocking sleep here. This ensures baketime survives operator restarts.
+func (m *MetricsChecker) CheckMetrics(ctx context.Context, namespace string, checks []dbupgradev1alpha1.MetricCheck) (*MetricCheckResult, error) {
 	for _, check := range checks {
-		// Handle bake time for post-checks
-		if check.BakeSeconds > 0 {
-			logger.Info("Waiting for bake time", "check", check.Name, "bakeSeconds", check.BakeSeconds, "type", checkType)
-			select {
-			case <-time.After(time.Duration(check.BakeSeconds) * time.Second):
-				// Continue after bake time
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
 		result, err := m.checkSingleMetric(ctx, namespace, check)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check metric %s: %w", check.Name, err)
@@ -98,7 +86,7 @@ func (m *MetricsChecker) CheckMetrics(ctx context.Context, namespace string, che
 
 	return &MetricCheckResult{
 		Passed:  true,
-		Message: fmt.Sprintf("All %d %s metric check(s) passed", len(checks), checkType),
+		Message: fmt.Sprintf("All %d metric check(s) passed", len(checks)),
 	}, nil
 }
 

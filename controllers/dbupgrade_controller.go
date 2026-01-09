@@ -87,6 +87,8 @@ type reconcileResult struct {
 	progressMessage string
 	requeueAfter    time.Duration
 	event           *eventInfo
+	// jobCompletedAt is set when job succeeds, used for baketime tracking
+	jobCompletedAt *metav1.Time
 }
 
 type eventInfo struct {
@@ -309,6 +311,11 @@ func (r *DBUpgradeReconciler) reconcileDBUpgrade(ctx context.Context, dbUpgrade 
 func (r *DBUpgradeReconciler) updateStatus(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade, result reconcileResult) error {
 	// Update observed generation
 	dbUpgrade.Status.ObservedGeneration = dbUpgrade.Generation
+
+	// Update jobCompletedAt if provided
+	if result.jobCompletedAt != nil {
+		dbUpgrade.Status.JobCompletedAt = result.jobCompletedAt
+	}
 
 	// Set conditions
 	gen := dbUpgrade.Generation
@@ -566,6 +573,8 @@ func (r *DBUpgradeReconciler) createMigrationJob(ctx context.Context, dbUpgrade 
 
 // syncJobStatus maps Job status to reconcileResult
 func (r *DBUpgradeReconciler) syncJobStatus(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade, job *batchv1.Job) reconcileResult {
+	logger := log.FromContext(ctx)
+
 	if job == nil {
 		return reconcileResult{
 			ready:           false,
@@ -579,14 +588,29 @@ func (r *DBUpgradeReconciler) syncJobStatus(ctx context.Context, dbUpgrade *dbup
 
 	// Job succeeded
 	if isJobSucceeded(job) {
+		// Get job completion time from job status or status (for persistence across reconciles)
+		var jobCompletedAt *metav1.Time
+		if job.Status.CompletionTime != nil {
+			jobCompletedAt = job.Status.CompletionTime
+		} else if dbUpgrade.Status.JobCompletedAt != nil {
+			jobCompletedAt = dbUpgrade.Status.JobCompletedAt
+		} else {
+			// Fallback to now (shouldn't happen normally)
+			now := metav1.Now()
+			jobCompletedAt = &now
+		}
+
 		// Run postchecks before declaring success
 		if dbUpgrade.Spec.Checks != nil && len(dbUpgrade.Spec.Checks.Post.Metrics) > 0 {
-			postCheckResult := r.runPostChecks(ctx, dbUpgrade)
+			postCheckResult := r.runPostChecks(ctx, dbUpgrade, jobCompletedAt)
 			if !postCheckResult.ready {
+				// Preserve jobCompletedAt in result so it gets persisted
+				postCheckResult.jobCompletedAt = jobCompletedAt
 				return postCheckResult
 			}
 		}
 
+		logger.Info("Migration completed successfully", "job", job.Name)
 		return reconcileResult{
 			ready:           true,
 			readyReason:     dbupgradev1alpha1.ReasonMigrationComplete,
@@ -594,6 +618,7 @@ func (r *DBUpgradeReconciler) syncJobStatus(ctx context.Context, dbUpgrade *dbup
 			progressing:     false,
 			progressReason:  dbupgradev1alpha1.ReasonMigrationComplete,
 			progressMessage: fmt.Sprintf("Job %s completed", job.Name),
+			jobCompletedAt:  jobCompletedAt,
 			event:           &eventInfo{corev1.EventTypeNormal, "MigrationSucceeded", "Database migration completed successfully"},
 		}
 	}
@@ -759,7 +784,7 @@ func (r *DBUpgradeReconciler) runPreChecks(ctx context.Context, dbUpgrade *dbupg
 				}
 			}
 
-			result, err := metricsChecker.CheckMetrics(ctx, dbUpgrade.Namespace, dbUpgrade.Spec.Checks.Pre.Metrics, "pre")
+			result, err := metricsChecker.CheckMetrics(ctx, dbUpgrade.Namespace, dbUpgrade.Spec.Checks.Pre.Metrics)
 			if err != nil {
 				logger.Error(err, "Failed to run metric precheck")
 				return reconcileResult{
@@ -793,7 +818,8 @@ func (r *DBUpgradeReconciler) runPreChecks(ctx context.Context, dbUpgrade *dbupg
 }
 
 // runPostChecks runs all postchecks and returns a reconcileResult
-func (r *DBUpgradeReconciler) runPostChecks(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade) reconcileResult {
+// jobCompletedAt is used for baketime calculation instead of blocking sleep
+func (r *DBUpgradeReconciler) runPostChecks(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade, jobCompletedAt *metav1.Time) reconcileResult {
 	logger := log.FromContext(ctx)
 
 	if dbUpgrade.Spec.Checks == nil || len(dbUpgrade.Spec.Checks.Post.Metrics) == 0 {
@@ -803,6 +829,38 @@ func (r *DBUpgradeReconciler) runPostChecks(ctx context.Context, dbUpgrade *dbup
 	if r.RestConfig == nil {
 		logger.Info("RestConfig not available for metric checks, skipping")
 		return reconcileResult{ready: true}
+	}
+
+	// Calculate max baketime from all postchecks
+	var maxBakeSeconds int32
+	for _, check := range dbUpgrade.Spec.Checks.Post.Metrics {
+		if check.BakeSeconds > maxBakeSeconds {
+			maxBakeSeconds = check.BakeSeconds
+		}
+	}
+
+	// Check if baketime has elapsed (timestamp-based, survives restarts)
+	if maxBakeSeconds > 0 && jobCompletedAt != nil {
+		elapsedSeconds := int32(time.Since(jobCompletedAt.Time).Seconds())
+		if elapsedSeconds < maxBakeSeconds {
+			remainingSeconds := maxBakeSeconds - elapsedSeconds
+			logger.Info("Waiting for bake time",
+				"elapsed", elapsedSeconds,
+				"required", maxBakeSeconds,
+				"remaining", remainingSeconds)
+			return reconcileResult{
+				ready:           false,
+				readyReason:     dbupgradev1alpha1.ReasonPostCheckBakeTimeWaiting,
+				readyMessage:    fmt.Sprintf("Waiting for bake time: %ds remaining", remainingSeconds),
+				progressing:     true,
+				progressReason:  dbupgradev1alpha1.ReasonPostCheckBakeTimeWaiting,
+				progressMessage: fmt.Sprintf("Bake time: %d/%d seconds elapsed", elapsedSeconds, maxBakeSeconds),
+				requeueAfter:    time.Duration(remainingSeconds) * time.Second,
+			}
+		}
+		logger.Info("Bake time elapsed, proceeding with postchecks",
+			"elapsed", elapsedSeconds,
+			"required", maxBakeSeconds)
 	}
 
 	metricsChecker, err := checks.NewMetricsChecker(r.RestConfig)
@@ -819,7 +877,8 @@ func (r *DBUpgradeReconciler) runPostChecks(ctx context.Context, dbUpgrade *dbup
 		}
 	}
 
-	result, err := metricsChecker.CheckMetrics(ctx, dbUpgrade.Namespace, dbUpgrade.Spec.Checks.Post.Metrics, "post")
+	// Pass nil for completedAt since we've already handled baketime at controller level
+	result, err := metricsChecker.CheckMetrics(ctx, dbUpgrade.Namespace, dbUpgrade.Spec.Checks.Post.Metrics)
 	if err != nil {
 		logger.Error(err, "Failed to run metric postcheck")
 		return reconcileResult{

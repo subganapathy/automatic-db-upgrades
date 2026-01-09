@@ -149,6 +149,13 @@ type MinPodVersionCheck struct {
 	// +optional
 	ContainerName string `json:"containerName,omitempty"`
 
+	// StrictMode controls behavior when pods have non-semver image tags.
+	// When true (default): non-semver pods cause check failure.
+	// When false: non-semver pods are skipped (not counted as pass or fail).
+	// +kubebuilder:default=true
+	// +optional
+	StrictMode *bool `json:"strictMode,omitempty"`
+
 	// DisallowDowngrade prevents downgrades
 	// +kubebuilder:default=false
 	// +optional
@@ -327,6 +334,11 @@ type DBUpgradeStatus struct {
 	// ObservedGeneration reflects the generation of the most recently observed DBUpgrade
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// JobCompletedAt records when the migration job completed successfully.
+	// Used for baketime calculation in post-checks.
+	// +optional
+	JobCompletedAt *metav1.Time `json:"jobCompletedAt,omitempty"`
 
 	// Conditions represent the latest available observations of DBUpgrade's state
 	// +listType=map

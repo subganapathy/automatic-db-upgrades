@@ -37,6 +37,9 @@ const (
 
 	// ReasonPostCheckFailed - post-migration check failed
 	ReasonPostCheckFailed = "PostCheckFailed"
+
+	// ReasonPostCheckBakeTimeWaiting - waiting for bake time before postcheck
+	ReasonPostCheckBakeTimeWaiting = "PostCheckBakeTimeWaiting"
 )
 
 // SetCondition sets or updates a condition in the conditions slice
