@@ -1,0 +1,63 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dbupgrade-operator.fullname" . }}-manager-role
+  labels:
+    {{- include "dbupgrade-operator.labels" . | nindent 4 }}
+rules:
+# DBUpgrade resources
+- apiGroups: ["dbupgrade.subbug.learning"]
+  resources: ["dbupgrades"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["dbupgrade.subbug.learning"]
+  resources: ["dbupgrades/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["dbupgrade.subbug.learning"]
+  resources: ["dbupgrades/finalizers"]
+  verbs: ["update"]
+# Jobs for migrations
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs/status"]
+  verbs: ["get"]
+# Secrets for DB credentials
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Events for observability
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+# Pods for version precheck
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+# Leases for leader election
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Custom metrics for pre/post checks
+- apiGroups: ["custom.metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+# External metrics for pre/post checks
+- apiGroups: ["external.metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dbupgrade-operator.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "dbupgrade-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "dbupgrade-operator.fullname" . }}-manager-role
+subjects:
+- kind: ServiceAccount
+  name: {{ include "dbupgrade-operator.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}

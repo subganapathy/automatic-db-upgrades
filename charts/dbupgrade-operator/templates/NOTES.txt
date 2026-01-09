@@ -1,0 +1,55 @@
+DBUpgrade Operator has been installed!
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+{{- if .Values.webhook.enabled }}
+{{- if .Values.webhook.certManager.enabled }}
+
+IMPORTANT: This chart requires cert-manager to be installed for webhook TLS.
+If cert-manager is not installed, run:
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.0/cert-manager.yaml
+
+You also need to create a self-signed issuer:
+  cat <<EOF | kubectl apply -f -
+  apiVersion: cert-manager.io/v1
+  kind: Issuer
+  metadata:
+    name: selfsigned-issuer
+    namespace: {{ .Release.Namespace }}
+  spec:
+    selfSigned: {}
+  EOF
+{{- end }}
+{{- end }}
+
+To verify the installation:
+  kubectl get deployment -n {{ .Release.Namespace }} {{ include "dbupgrade-operator.fullname" . }}
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "dbupgrade-operator.name" . }}
+
+To create a database upgrade:
+  cat <<EOF | kubectl apply -f -
+  apiVersion: dbupgrade.subbug.learning/v1alpha1
+  kind: DBUpgrade
+  metadata:
+    name: my-upgrade
+    namespace: default
+  spec:
+    database:
+      driver: postgres
+      host: my-db.example.com
+      port: 5432
+      name: mydb
+      credentials:
+        secretRef:
+          name: db-credentials
+          usernameKey: username
+          passwordKey: password
+    migrations:
+      source:
+        image: my-app:latest
+        path: /migrations
+  EOF
+
+For more information, visit:
+  https://github.com/subganapathy/automatic-db-upgrades

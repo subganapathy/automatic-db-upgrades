@@ -1,0 +1,13 @@
+{{- if and .Values.webhook.enabled .Values.webhook.certManager.enabled }}
+{{- if eq .Values.webhook.certManager.issuerRef.kind "Issuer" }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ .Values.webhook.certManager.issuerRef.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dbupgrade-operator.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+{{- end }}
+{{- end }}

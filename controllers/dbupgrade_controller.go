@@ -14,17 +14,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	dbupgradev1alpha1 "github.com/subganapathy/automatic-db-upgrades/api/v1alpha1"
+	awsutil "github.com/subganapathy/automatic-db-upgrades/internal/aws"
+	"github.com/subganapathy/automatic-db-upgrades/internal/checks"
 )
 
 // DBUpgradeReconciler reconciles a DBUpgrade object
 type DBUpgradeReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme     *runtime.Scheme
+	RestConfig *rest.Config
 }
 
 //+kubebuilder:rbac:groups=dbupgrade.subbug.learning,resources=dbupgrades,verbs=get;list;watch;create;update;patch;delete
@@ -131,31 +135,35 @@ func (r *DBUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func (r *DBUpgradeReconciler) reconcileDBUpgrade(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade) reconcileResult {
 	logger := log.FromContext(ctx)
 
-	// Check database type - only selfHosted supported for now
-	if dbUpgrade.Spec.Database.Type != dbupgradev1alpha1.DatabaseTypeSelfHosted {
-		logger.Info("AWS database types not yet supported", "type", dbUpgrade.Spec.Database.Type)
-		return reconcileResult{
-			ready:           false,
-			readyReason:     dbupgradev1alpha1.ReasonAWSNotSupported,
-			readyMessage:    "AWS RDS/Aurora support not yet implemented",
-			progressing:     false,
-			progressReason:  dbupgradev1alpha1.ReasonAWSNotSupported,
-			progressMessage: fmt.Sprintf("Database type %s not yet supported", dbUpgrade.Spec.Database.Type),
+	// For selfHosted databases, validate customer's Secret exists
+	if dbUpgrade.Spec.Database.Type == dbupgradev1alpha1.DatabaseTypeSelfHosted {
+		if err := r.validateSecret(ctx, dbUpgrade); err != nil {
+			logger.Info("Secret validation failed", "error", err)
+			return reconcileResult{
+				ready:           false,
+				readyReason:     dbupgradev1alpha1.ReasonSecretNotFound,
+				readyMessage:    err.Error(),
+				progressing:     false,
+				progressReason:  dbupgradev1alpha1.ReasonSecretNotFound,
+				progressMessage: err.Error(),
+				requeueAfter:    30 * time.Second,
+				event:           &eventInfo{corev1.EventTypeWarning, "SecretNotFound", err.Error()},
+			}
 		}
 	}
 
-	// Validate customer's Secret exists
-	if err := r.validateSecret(ctx, dbUpgrade); err != nil {
-		logger.Info("Secret validation failed", "error", err)
-		return reconcileResult{
-			ready:           false,
-			readyReason:     dbupgradev1alpha1.ReasonSecretNotFound,
-			readyMessage:    err.Error(),
-			progressing:     false,
-			progressReason:  dbupgradev1alpha1.ReasonSecretNotFound,
-			progressMessage: err.Error(),
-			requeueAfter:    30 * time.Second,
-			event:           &eventInfo{corev1.EventTypeWarning, "SecretNotFound", err.Error()},
+	// For AWS databases, validate AWS config is provided
+	if dbUpgrade.Spec.Database.Type == dbupgradev1alpha1.DatabaseTypeAWSRDS ||
+		dbUpgrade.Spec.Database.Type == dbupgradev1alpha1.DatabaseTypeAWSAurora {
+		if dbUpgrade.Spec.Database.AWS == nil {
+			return reconcileResult{
+				ready:           false,
+				readyReason:     dbupgradev1alpha1.ReasonAWSNotSupported,
+				readyMessage:    "database.aws configuration is required for AWS RDS/Aurora",
+				progressing:     false,
+				progressReason:  dbupgradev1alpha1.ReasonAWSNotSupported,
+				progressMessage: "Missing AWS configuration",
+			}
 		}
 	}
 
@@ -246,6 +254,14 @@ func (r *DBUpgradeReconciler) reconcileDBUpgrade(ctx context.Context, dbUpgrade 
 
 	// Create Job if doesn't exist
 	if existingJob == nil {
+		// Run prechecks before creating the Job
+		if dbUpgrade.Spec.Checks != nil {
+			preCheckResult := r.runPreChecks(ctx, dbUpgrade)
+			if !preCheckResult.ready {
+				return preCheckResult
+			}
+		}
+
 		logger.Info("Creating migration Job", "jobName", expectedJobName)
 		job, err := r.createMigrationJob(ctx, dbUpgrade, migrationSecret, currentHash)
 		if err != nil {
@@ -286,7 +302,7 @@ func (r *DBUpgradeReconciler) reconcileDBUpgrade(ctx context.Context, dbUpgrade 
 	}
 
 	// Sync Job status to conditions
-	return r.syncJobStatus(existingJob)
+	return r.syncJobStatus(ctx, dbUpgrade, existingJob)
 }
 
 // updateStatus writes the reconcile result to the DBUpgrade status
@@ -334,24 +350,57 @@ func (r *DBUpgradeReconciler) ensureMigrationSecret(ctx context.Context, dbUpgra
 	logger := log.FromContext(ctx)
 	secretName := fmt.Sprintf("dbupgrade-%s-connection", dbUpgrade.Name)
 
-	if dbUpgrade.Spec.Database.Type != dbupgradev1alpha1.DatabaseTypeSelfHosted {
-		return nil, fmt.Errorf("AWS database types not yet supported")
-	}
+	var connectionURL []byte
 
-	// Read customer's Secret
-	customerSecretRef := dbUpgrade.Spec.Database.Connection.URLSecretRef
-	customerSecret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: customerSecretRef.Name, Namespace: dbUpgrade.Namespace}, customerSecret); err != nil {
-		return nil, fmt.Errorf("failed to get customer secret: %w", err)
+	switch dbUpgrade.Spec.Database.Type {
+	case dbupgradev1alpha1.DatabaseTypeSelfHosted:
+		// Read customer's Secret
+		customerSecretRef := dbUpgrade.Spec.Database.Connection.URLSecretRef
+		customerSecret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: customerSecretRef.Name, Namespace: dbUpgrade.Namespace}, customerSecret); err != nil {
+			return nil, fmt.Errorf("failed to get customer secret: %w", err)
+		}
+		connectionURL = customerSecret.Data[customerSecretRef.Key]
+
+	case dbupgradev1alpha1.DatabaseTypeAWSRDS, dbupgradev1alpha1.DatabaseTypeAWSAurora:
+		// Generate RDS IAM auth token
+		awsCfg := dbUpgrade.Spec.Database.AWS
+		if awsCfg == nil {
+			return nil, fmt.Errorf("database.aws configuration is required for AWS RDS/Aurora")
+		}
+
+		rdsAuthCfg := awsutil.RDSAuthConfig{
+			Region:   awsCfg.Region,
+			Host:     awsCfg.Host,
+			Port:     awsCfg.Port,
+			Username: awsCfg.Username,
+			DBName:   awsCfg.DBName,
+			RoleArn:  awsCfg.RoleArn,
+		}
+
+		token, err := awsutil.GenerateRDSAuthToken(ctx, rdsAuthCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate RDS auth token: %w", err)
+		}
+
+		// Build connection URL with the token as password
+		// Atlas expects PostgreSQL URL format
+		url := awsutil.BuildPostgresConnectionURL(rdsAuthCfg, token)
+		connectionURL = []byte(url)
+		logger.Info("Generated RDS IAM auth token", "host", awsCfg.Host, "user", awsCfg.Username)
+
+	default:
+		return nil, fmt.Errorf("unsupported database type: %s", dbUpgrade.Spec.Database.Type)
 	}
-	connectionURL := customerSecret.Data[customerSecretRef.Key]
 
 	// Check if operator Secret already exists
 	existingSecret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: dbUpgrade.Namespace}, existingSecret)
 	if err == nil {
-		// Update if connection URL changed
-		if string(existingSecret.Data["url"]) != string(connectionURL) {
+		// Always update for AWS (token may have expired) or if URL changed for selfHosted
+		needsUpdate := dbUpgrade.Spec.Database.Type != dbupgradev1alpha1.DatabaseTypeSelfHosted ||
+			string(existingSecret.Data["url"]) != string(connectionURL)
+		if needsUpdate {
 			existingSecret.Data["url"] = connectionURL
 			if err := r.Update(ctx, existingSecret); err != nil {
 				return nil, fmt.Errorf("failed to update migration secret: %w", err)
@@ -516,7 +565,7 @@ func (r *DBUpgradeReconciler) createMigrationJob(ctx context.Context, dbUpgrade 
 }
 
 // syncJobStatus maps Job status to reconcileResult
-func (r *DBUpgradeReconciler) syncJobStatus(job *batchv1.Job) reconcileResult {
+func (r *DBUpgradeReconciler) syncJobStatus(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade, job *batchv1.Job) reconcileResult {
 	if job == nil {
 		return reconcileResult{
 			ready:           false,
@@ -530,6 +579,14 @@ func (r *DBUpgradeReconciler) syncJobStatus(job *batchv1.Job) reconcileResult {
 
 	// Job succeeded
 	if isJobSucceeded(job) {
+		// Run postchecks before declaring success
+		if dbUpgrade.Spec.Checks != nil && len(dbUpgrade.Spec.Checks.Post.Metrics) > 0 {
+			postCheckResult := r.runPostChecks(ctx, dbUpgrade)
+			if !postCheckResult.ready {
+				return postCheckResult
+			}
+		}
+
 		return reconcileResult{
 			ready:           true,
 			readyReason:     dbupgradev1alpha1.ReasonMigrationComplete,
@@ -642,6 +699,155 @@ func (r *DBUpgradeReconciler) recordEvent(ctx context.Context, dbUpgrade *dbupgr
 
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+// runPreChecks runs all prechecks and returns a reconcileResult
+func (r *DBUpgradeReconciler) runPreChecks(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade) reconcileResult {
+	logger := log.FromContext(ctx)
+
+	if dbUpgrade.Spec.Checks == nil {
+		return reconcileResult{ready: true}
+	}
+
+	// Run pod version checks
+	if len(dbUpgrade.Spec.Checks.Pre.MinPodVersions) > 0 {
+		result, err := checks.CheckMinPodVersions(ctx, r.Client, dbUpgrade.Namespace, dbUpgrade.Spec.Checks.Pre.MinPodVersions)
+		if err != nil {
+			logger.Error(err, "Failed to run pod version check")
+			return reconcileResult{
+				ready:           false,
+				readyReason:     dbupgradev1alpha1.ReasonPreCheckImageVersionFailed,
+				readyMessage:    err.Error(),
+				progressing:     false,
+				progressReason:  dbupgradev1alpha1.ReasonPreCheckImageVersionFailed,
+				progressMessage: "Error running pod version check",
+				requeueAfter:    30 * time.Second,
+			}
+		}
+		if !result.Passed {
+			logger.Info("Pod version precheck failed", "message", result.Message)
+			return reconcileResult{
+				ready:           false,
+				readyReason:     dbupgradev1alpha1.ReasonPreCheckImageVersionFailed,
+				readyMessage:    result.Message,
+				progressing:     false,
+				progressReason:  dbupgradev1alpha1.ReasonPreCheckImageVersionFailed,
+				progressMessage: result.Message,
+				requeueAfter:    60 * time.Second,
+				event:           &eventInfo{corev1.EventTypeWarning, "PreCheckFailed", result.Message},
+			}
+		}
+		logger.Info("Pod version precheck passed", "message", result.Message)
+	}
+
+	// Run metric checks
+	if len(dbUpgrade.Spec.Checks.Pre.Metrics) > 0 {
+		if r.RestConfig == nil {
+			logger.Info("RestConfig not available for metric checks, skipping")
+		} else {
+			metricsChecker, err := checks.NewMetricsChecker(r.RestConfig)
+			if err != nil {
+				logger.Error(err, "Failed to create metrics checker")
+				return reconcileResult{
+					ready:           false,
+					readyReason:     dbupgradev1alpha1.ReasonPreCheckMetricFailed,
+					readyMessage:    "Failed to create metrics checker",
+					progressing:     false,
+					progressReason:  dbupgradev1alpha1.ReasonPreCheckMetricFailed,
+					progressMessage: err.Error(),
+					requeueAfter:    30 * time.Second,
+				}
+			}
+
+			result, err := metricsChecker.CheckMetrics(ctx, dbUpgrade.Namespace, dbUpgrade.Spec.Checks.Pre.Metrics, "pre")
+			if err != nil {
+				logger.Error(err, "Failed to run metric precheck")
+				return reconcileResult{
+					ready:           false,
+					readyReason:     dbupgradev1alpha1.ReasonPreCheckMetricFailed,
+					readyMessage:    err.Error(),
+					progressing:     false,
+					progressReason:  dbupgradev1alpha1.ReasonPreCheckMetricFailed,
+					progressMessage: "Error running metric check",
+					requeueAfter:    30 * time.Second,
+				}
+			}
+			if !result.Passed {
+				logger.Info("Metric precheck failed", "message", result.Message)
+				return reconcileResult{
+					ready:           false,
+					readyReason:     dbupgradev1alpha1.ReasonPreCheckMetricFailed,
+					readyMessage:    result.Message,
+					progressing:     false,
+					progressReason:  dbupgradev1alpha1.ReasonPreCheckMetricFailed,
+					progressMessage: result.Message,
+					requeueAfter:    60 * time.Second,
+					event:           &eventInfo{corev1.EventTypeWarning, "PreCheckFailed", result.Message},
+				}
+			}
+			logger.Info("Metric precheck passed", "message", result.Message)
+		}
+	}
+
+	return reconcileResult{ready: true}
+}
+
+// runPostChecks runs all postchecks and returns a reconcileResult
+func (r *DBUpgradeReconciler) runPostChecks(ctx context.Context, dbUpgrade *dbupgradev1alpha1.DBUpgrade) reconcileResult {
+	logger := log.FromContext(ctx)
+
+	if dbUpgrade.Spec.Checks == nil || len(dbUpgrade.Spec.Checks.Post.Metrics) == 0 {
+		return reconcileResult{ready: true}
+	}
+
+	if r.RestConfig == nil {
+		logger.Info("RestConfig not available for metric checks, skipping")
+		return reconcileResult{ready: true}
+	}
+
+	metricsChecker, err := checks.NewMetricsChecker(r.RestConfig)
+	if err != nil {
+		logger.Error(err, "Failed to create metrics checker")
+		return reconcileResult{
+			ready:           false,
+			readyReason:     dbupgradev1alpha1.ReasonPostCheckFailed,
+			readyMessage:    "Failed to create metrics checker",
+			progressing:     false,
+			progressReason:  dbupgradev1alpha1.ReasonPostCheckFailed,
+			progressMessage: err.Error(),
+			requeueAfter:    30 * time.Second,
+		}
+	}
+
+	result, err := metricsChecker.CheckMetrics(ctx, dbUpgrade.Namespace, dbUpgrade.Spec.Checks.Post.Metrics, "post")
+	if err != nil {
+		logger.Error(err, "Failed to run metric postcheck")
+		return reconcileResult{
+			ready:           false,
+			readyReason:     dbupgradev1alpha1.ReasonPostCheckFailed,
+			readyMessage:    err.Error(),
+			progressing:     false,
+			progressReason:  dbupgradev1alpha1.ReasonPostCheckFailed,
+			progressMessage: "Error running metric check",
+			requeueAfter:    30 * time.Second,
+		}
+	}
+	if !result.Passed {
+		logger.Info("Metric postcheck failed", "message", result.Message)
+		return reconcileResult{
+			ready:           false,
+			readyReason:     dbupgradev1alpha1.ReasonPostCheckFailed,
+			readyMessage:    result.Message,
+			progressing:     false,
+			progressReason:  dbupgradev1alpha1.ReasonPostCheckFailed,
+			progressMessage: result.Message,
+			requeueAfter:    60 * time.Second,
+			event:           &eventInfo{corev1.EventTypeWarning, "PostCheckFailed", result.Message},
+		}
+	}
+	logger.Info("Metric postcheck passed", "message", result.Message)
+
+	return reconcileResult{ready: true}
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -1,0 +1,890 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.2
+  name: dbupgrades.dbupgrade.subbug.learning
+spec:
+  group: dbupgrade.subbug.learning
+  names:
+    kind: DBUpgrade
+    listKind: DBUpgradeList
+    plural: dbupgrades
+    shortNames:
+    - dbu
+    singular: dbupgrade
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Migration completed successfully
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - description: Migration in progress
+      jsonPath: .status.conditions[?(@.type=="Progressing")].status
+      name: Progressing
+      type: string
+    - description: Current state reason
+      jsonPath: .status.conditions[?(@.type=="Progressing")].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: DBUpgrade is the Schema for the dbupgrades API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: DBUpgradeSpec defines the desired state of DBUpgrade
+            properties:
+              checks:
+                description: Pre and post upgrade checks
+                properties:
+                  post:
+                    description: Post-upgrade checks
+                    properties:
+                      metrics:
+                        description: Metrics to check (list-as-map keyed by name for
+                          GitOps-friendly edits)
+                        items:
+                          description: MetricCheck defines a metric check
+                          properties:
+                            bakeSeconds:
+                              default: 0
+                              description: BakeSeconds is the time to wait before
+                                evaluating
+                              format: int32
+                              type: integer
+                            intervalSeconds:
+                              default: 15
+                              description: IntervalSeconds is the interval between
+                                metric queries
+                              format: int32
+                              type: integer
+                            metricName:
+                              description: MetricName is the name of the metric
+                              type: string
+                            name:
+                              description: Name is required and must be unique (list-as-map
+                                semantics).
+                              minLength: 1
+                              type: string
+                            reduce:
+                              allOf:
+                              - enum:
+                                - Max
+                                - Avg
+                                - Sum
+                                - Min
+                              - enum:
+                                - Max
+                                - Avg
+                                - Sum
+                                - Min
+                              default: Max
+                              description: Reduce function to apply to multiple values
+                              type: string
+                            source:
+                              allOf:
+                              - enum:
+                                - Custom
+                                - External
+                              - enum:
+                                - Custom
+                                - External
+                              default: Custom
+                              description: Source of the metric
+                              type: string
+                            target:
+                              description: Target defines what to query for the metric
+                              properties:
+                                external:
+                                  description: External target configuration (optional
+                                    when type=External)
+                                  properties:
+                                    selector:
+                                      description: Selector (optional)
+                                      properties:
+                                        matchExpressions:
+                                          description: matchExpressions is a list
+                                            of label selector requirements. The requirements
+                                            are ANDed.
+                                          items:
+                                            description: |-
+                                              A label selector requirement is a selector that contains values, a key, and an operator that
+                                              relates the key and values.
+                                            properties:
+                                              key:
+                                                description: key is the label key
+                                                  that the selector applies to.
+                                                type: string
+                                              operator:
+                                                description: |-
+                                                  operator represents a key's relationship to a set of values.
+                                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                                type: string
+                                              values:
+                                                description: |-
+                                                  values is an array of string values. If the operator is In or NotIn,
+                                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                  the values array must be empty. This array is replaced during a strategic
+                                                  merge patch.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            required:
+                                            - key
+                                            - operator
+                                            type: object
+                                          type: array
+                                        matchLabels:
+                                          additionalProperties:
+                                            type: string
+                                          description: |-
+                                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                          type: object
+                                      type: object
+                                      x-kubernetes-map-type: atomic
+                                  type: object
+                                object:
+                                  description: Object target configuration (required
+                                    when type=Object)
+                                  properties:
+                                    ref:
+                                      description: Reference to the object
+                                      properties:
+                                        apiVersion:
+                                          description: APIVersion of the object
+                                          type: string
+                                        kind:
+                                          description: Kind of the object
+                                          type: string
+                                        name:
+                                          description: Name of the object
+                                          type: string
+                                      required:
+                                      - apiVersion
+                                      - kind
+                                      - name
+                                      type: object
+                                    selector:
+                                      description: Selector for sub-resources (optional)
+                                      properties:
+                                        matchExpressions:
+                                          description: matchExpressions is a list
+                                            of label selector requirements. The requirements
+                                            are ANDed.
+                                          items:
+                                            description: |-
+                                              A label selector requirement is a selector that contains values, a key, and an operator that
+                                              relates the key and values.
+                                            properties:
+                                              key:
+                                                description: key is the label key
+                                                  that the selector applies to.
+                                                type: string
+                                              operator:
+                                                description: |-
+                                                  operator represents a key's relationship to a set of values.
+                                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                                type: string
+                                              values:
+                                                description: |-
+                                                  values is an array of string values. If the operator is In or NotIn,
+                                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                  the values array must be empty. This array is replaced during a strategic
+                                                  merge patch.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            required:
+                                            - key
+                                            - operator
+                                            type: object
+                                          type: array
+                                        matchLabels:
+                                          additionalProperties:
+                                            type: string
+                                          description: |-
+                                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                          type: object
+                                      type: object
+                                      x-kubernetes-map-type: atomic
+                                  required:
+                                  - ref
+                                  type: object
+                                pods:
+                                  description: Pods target configuration (required
+                                    when type=Pods)
+                                  properties:
+                                    selector:
+                                      description: Selector to select pods
+                                      properties:
+                                        matchExpressions:
+                                          description: matchExpressions is a list
+                                            of label selector requirements. The requirements
+                                            are ANDed.
+                                          items:
+                                            description: |-
+                                              A label selector requirement is a selector that contains values, a key, and an operator that
+                                              relates the key and values.
+                                            properties:
+                                              key:
+                                                description: key is the label key
+                                                  that the selector applies to.
+                                                type: string
+                                              operator:
+                                                description: |-
+                                                  operator represents a key's relationship to a set of values.
+                                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                                type: string
+                                              values:
+                                                description: |-
+                                                  values is an array of string values. If the operator is In or NotIn,
+                                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                  the values array must be empty. This array is replaced during a strategic
+                                                  merge patch.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            required:
+                                            - key
+                                            - operator
+                                            type: object
+                                          type: array
+                                        matchLabels:
+                                          additionalProperties:
+                                            type: string
+                                          description: |-
+                                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                          type: object
+                                      type: object
+                                      x-kubernetes-map-type: atomic
+                                  required:
+                                  - selector
+                                  type: object
+                                type:
+                                  allOf:
+                                  - enum:
+                                    - Pods
+                                    - Object
+                                    - External
+                                  - enum:
+                                    - Pods
+                                    - Object
+                                    - External
+                                  description: Type of target
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            threshold:
+                              description: Threshold defines the threshold condition
+                              properties:
+                                operator:
+                                  allOf:
+                                  - enum:
+                                    - '>'
+                                    - '>='
+                                    - <
+                                    - <=
+                                  - enum:
+                                    - '>'
+                                    - '>='
+                                    - <
+                                    - <=
+                                  description: Operator for comparison
+                                  type: string
+                                value:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: |-
+                                    Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
+                                    Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
+                                    In Phase 1 controller logic, use Quantity.AsApproximateFloat64() or string parsing consistently
+                                    for both metric values and threshold comparisons.
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                              required:
+                              - operator
+                              - value
+                              type: object
+                          required:
+                          - metricName
+                          - name
+                          - target
+                          - threshold
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                    type: object
+                  pre:
+                    description: Pre-upgrade checks
+                    properties:
+                      metrics:
+                        description: Metrics to check (list-as-map keyed by name for
+                          GitOps-friendly edits)
+                        items:
+                          description: MetricCheck defines a metric check
+                          properties:
+                            bakeSeconds:
+                              default: 0
+                              description: BakeSeconds is the time to wait before
+                                evaluating
+                              format: int32
+                              type: integer
+                            intervalSeconds:
+                              default: 15
+                              description: IntervalSeconds is the interval between
+                                metric queries
+                              format: int32
+                              type: integer
+                            metricName:
+                              description: MetricName is the name of the metric
+                              type: string
+                            name:
+                              description: Name is required and must be unique (list-as-map
+                                semantics).
+                              minLength: 1
+                              type: string
+                            reduce:
+                              allOf:
+                              - enum:
+                                - Max
+                                - Avg
+                                - Sum
+                                - Min
+                              - enum:
+                                - Max
+                                - Avg
+                                - Sum
+                                - Min
+                              default: Max
+                              description: Reduce function to apply to multiple values
+                              type: string
+                            source:
+                              allOf:
+                              - enum:
+                                - Custom
+                                - External
+                              - enum:
+                                - Custom
+                                - External
+                              default: Custom
+                              description: Source of the metric
+                              type: string
+                            target:
+                              description: Target defines what to query for the metric
+                              properties:
+                                external:
+                                  description: External target configuration (optional
+                                    when type=External)
+                                  properties:
+                                    selector:
+                                      description: Selector (optional)
+                                      properties:
+                                        matchExpressions:
+                                          description: matchExpressions is a list
+                                            of label selector requirements. The requirements
+                                            are ANDed.
+                                          items:
+                                            description: |-
+                                              A label selector requirement is a selector that contains values, a key, and an operator that
+                                              relates the key and values.
+                                            properties:
+                                              key:
+                                                description: key is the label key
+                                                  that the selector applies to.
+                                                type: string
+                                              operator:
+                                                description: |-
+                                                  operator represents a key's relationship to a set of values.
+                                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                                type: string
+                                              values:
+                                                description: |-
+                                                  values is an array of string values. If the operator is In or NotIn,
+                                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                  the values array must be empty. This array is replaced during a strategic
+                                                  merge patch.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            required:
+                                            - key
+                                            - operator
+                                            type: object
+                                          type: array
+                                        matchLabels:
+                                          additionalProperties:
+                                            type: string
+                                          description: |-
+                                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                          type: object
+                                      type: object
+                                      x-kubernetes-map-type: atomic
+                                  type: object
+                                object:
+                                  description: Object target configuration (required
+                                    when type=Object)
+                                  properties:
+                                    ref:
+                                      description: Reference to the object
+                                      properties:
+                                        apiVersion:
+                                          description: APIVersion of the object
+                                          type: string
+                                        kind:
+                                          description: Kind of the object
+                                          type: string
+                                        name:
+                                          description: Name of the object
+                                          type: string
+                                      required:
+                                      - apiVersion
+                                      - kind
+                                      - name
+                                      type: object
+                                    selector:
+                                      description: Selector for sub-resources (optional)
+                                      properties:
+                                        matchExpressions:
+                                          description: matchExpressions is a list
+                                            of label selector requirements. The requirements
+                                            are ANDed.
+                                          items:
+                                            description: |-
+                                              A label selector requirement is a selector that contains values, a key, and an operator that
+                                              relates the key and values.
+                                            properties:
+                                              key:
+                                                description: key is the label key
+                                                  that the selector applies to.
+                                                type: string
+                                              operator:
+                                                description: |-
+                                                  operator represents a key's relationship to a set of values.
+                                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                                type: string
+                                              values:
+                                                description: |-
+                                                  values is an array of string values. If the operator is In or NotIn,
+                                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                  the values array must be empty. This array is replaced during a strategic
+                                                  merge patch.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            required:
+                                            - key
+                                            - operator
+                                            type: object
+                                          type: array
+                                        matchLabels:
+                                          additionalProperties:
+                                            type: string
+                                          description: |-
+                                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                          type: object
+                                      type: object
+                                      x-kubernetes-map-type: atomic
+                                  required:
+                                  - ref
+                                  type: object
+                                pods:
+                                  description: Pods target configuration (required
+                                    when type=Pods)
+                                  properties:
+                                    selector:
+                                      description: Selector to select pods
+                                      properties:
+                                        matchExpressions:
+                                          description: matchExpressions is a list
+                                            of label selector requirements. The requirements
+                                            are ANDed.
+                                          items:
+                                            description: |-
+                                              A label selector requirement is a selector that contains values, a key, and an operator that
+                                              relates the key and values.
+                                            properties:
+                                              key:
+                                                description: key is the label key
+                                                  that the selector applies to.
+                                                type: string
+                                              operator:
+                                                description: |-
+                                                  operator represents a key's relationship to a set of values.
+                                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                                type: string
+                                              values:
+                                                description: |-
+                                                  values is an array of string values. If the operator is In or NotIn,
+                                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                  the values array must be empty. This array is replaced during a strategic
+                                                  merge patch.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            required:
+                                            - key
+                                            - operator
+                                            type: object
+                                          type: array
+                                        matchLabels:
+                                          additionalProperties:
+                                            type: string
+                                          description: |-
+                                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                          type: object
+                                      type: object
+                                      x-kubernetes-map-type: atomic
+                                  required:
+                                  - selector
+                                  type: object
+                                type:
+                                  allOf:
+                                  - enum:
+                                    - Pods
+                                    - Object
+                                    - External
+                                  - enum:
+                                    - Pods
+                                    - Object
+                                    - External
+                                  description: Type of target
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            threshold:
+                              description: Threshold defines the threshold condition
+                              properties:
+                                operator:
+                                  allOf:
+                                  - enum:
+                                    - '>'
+                                    - '>='
+                                    - <
+                                    - <=
+                                  - enum:
+                                    - '>'
+                                    - '>='
+                                    - <
+                                    - <=
+                                  description: Operator for comparison
+                                  type: string
+                                value:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: |-
+                                    Value to compare against (resource.Quantity format as decimal string, e.g., "5", "1.5", "250m", "0.05" for 5%).
+                                    Note: Use decimal fractions for percentages (e.g., "0.05" for 5%), not percentage notation.
+                                    In Phase 1 controller logic, use Quantity.AsApproximateFloat64() or string parsing consistently
+                                    for both metric values and threshold comparisons.
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                              required:
+                              - operator
+                              - value
+                              type: object
+                          required:
+                          - metricName
+                          - name
+                          - target
+                          - threshold
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      minPodVersions:
+                        description: Minimum pod versions to check
+                        items:
+                          description: MinPodVersionCheck defines a minimum pod version
+                            check
+                          properties:
+                            containerName:
+                              description: ContainerName is the name of the container
+                                to check (optional)
+                              type: string
+                            disallowDowngrade:
+                              default: false
+                              description: DisallowDowngrade prevents downgrades
+                              type: boolean
+                            minVersion:
+                              description: MinVersion is the minimum required version
+                                (ImageTag-only semver)
+                              type: string
+                            selector:
+                              description: Selector to select pods to check
+                              properties:
+                                matchExpressions:
+                                  description: matchExpressions is a list of label
+                                    selector requirements. The requirements are ANDed.
+                                  items:
+                                    description: |-
+                                      A label selector requirement is a selector that contains values, a key, and an operator that
+                                      relates the key and values.
+                                    properties:
+                                      key:
+                                        description: key is the label key that the
+                                          selector applies to.
+                                        type: string
+                                      operator:
+                                        description: |-
+                                          operator represents a key's relationship to a set of values.
+                                          Valid operators are In, NotIn, Exists and DoesNotExist.
+                                        type: string
+                                      values:
+                                        description: |-
+                                          values is an array of string values. If the operator is In or NotIn,
+                                          the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                          the values array must be empty. This array is replaced during a strategic
+                                          merge patch.
+                                        items:
+                                          type: string
+                                        type: array
+                                    required:
+                                    - key
+                                    - operator
+                                    type: object
+                                  type: array
+                                matchLabels:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                    map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                    operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                  type: object
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          required:
+                          - minVersion
+                          - selector
+                          type: object
+                        type: array
+                    type: object
+                type: object
+              database:
+                description: Database configuration
+                properties:
+                  aws:
+                    description: AWS-specific configuration (placeholders for future
+                      use)
+                    properties:
+                      dbName:
+                        description: DBName is the database name
+                        type: string
+                      host:
+                        description: Host is the database endpoint
+                        type: string
+                      port:
+                        default: 5432
+                        description: Port is the database port
+                        format: int32
+                        type: integer
+                      region:
+                        description: Region is the AWS region
+                        type: string
+                      roleArn:
+                        description: |-
+                          RoleArn is the IAM role that the operator will assume to generate RDS auth tokens
+                          This role must:
+                          - Have trust policy allowing the operator's IAM role (via AssumeRole)
+                          - Have rds-db:connect permission for the database
+                          The operator has EKS Pod Identity and can assume this role
+                        pattern: ^arn:aws:iam::\d{12}:role\/[\w+=,.@-]+$
+                        type: string
+                      username:
+                        description: Username for database access (must be an RDS
+                          IAM user)
+                        type: string
+                    required:
+                    - dbName
+                    - host
+                    - region
+                    - roleArn
+                    - username
+                    type: object
+                  connection:
+                    description: Connection configuration
+                    properties:
+                      urlSecretRef:
+                        description: URLSecretRef references a secret containing the
+                          database URL
+                        properties:
+                          key:
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
+                            type: string
+                          name:
+                            description: |-
+                              Name of the referent.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
+                  type:
+                    allOf:
+                    - enum:
+                      - selfHosted
+                      - awsRds
+                      - awsAurora
+                    - enum:
+                      - selfHosted
+                      - awsRds
+                      - awsAurora
+                    description: Type of database
+                    type: string
+                required:
+                - type
+                type: object
+              migrations:
+                description: Migrations configuration
+                properties:
+                  dir:
+                    default: /migrations
+                    description: Dir is the directory containing migration files
+                    type: string
+                  image:
+                    description: Image is the container image to run migrations
+                    type: string
+                required:
+                - image
+                type: object
+              runner:
+                description: Runner configuration
+                properties:
+                  activeDeadlineSeconds:
+                    description: |-
+                      ActiveDeadlineSeconds for the runner job
+                      Can be > 15 minutes even with RDS IAM auth - tokens only expire for
+                      establishing connections, not for keeping them open
+                    format: int64
+                    type: integer
+                type: object
+            required:
+            - database
+            - migrations
+            type: object
+          status:
+            description: DBUpgradeStatus defines the observed state of DBUpgrade
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of DBUpgrade's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: ObservedGeneration reflects the generation of the most
+                  recently observed DBUpgrade
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

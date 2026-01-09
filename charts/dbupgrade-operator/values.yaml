@@ -1,0 +1,83 @@
+# Default values for dbupgrade-operator
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/subganapathy/automatic-db-upgrades
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Leader election
+leaderElection:
+  enabled: true
+
+# Metrics configuration
+metrics:
+  enabled: true
+  port: 8080
+
+# Health probes
+health:
+  port: 8081
+
+# Webhook configuration
+webhook:
+  enabled: true
+  port: 9443
+  # cert-manager integration
+  certManager:
+    enabled: true
+    issuerRef:
+      name: selfsigned-issuer
+      kind: Issuer
+
+# Crane image for extracting migrations from customer images
+craneImage: gcr.io/go-containerregistry/crane:v0.20.2
+
+# Atlas image for running migrations
+atlasImage: arigaio/atlas:latest
+
+# AWS configuration (for RDS/Aurora IAM auth)
+aws:
+  # Set to true to enable AWS IAM authentication
+  enabled: false
+  # Region for RDS token generation
+  region: ""
+  # Optional: ServiceAccount annotations for IRSA
+  serviceAccountAnnotations: {}
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/dbupgrade-operator

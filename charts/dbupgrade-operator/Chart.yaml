@@ -1,0 +1,19 @@
+apiVersion: v2
+name: dbupgrade-operator
+description: A Kubernetes operator for automated database schema migrations with pre/post checks
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - database
+  - migrations
+  - schema
+  - operator
+  - atlas
+  - postgresql
+  - rds
+home: https://github.com/subganapathy/automatic-db-upgrades
+sources:
+  - https://github.com/subganapathy/automatic-db-upgrades
+maintainers:
+  - name: subganapathy

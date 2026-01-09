@@ -1,322 +1,421 @@
-# Automatic DB Upgrades Operator
+# DBUpgrade Operator
 
-Kubernetes operator for automated database upgrades using kubebuilder.
+A production-ready Kubernetes operator for automated database schema migrations using [Atlas](https://atlasgo.io/).
 
-## Milestone 1 Status ✅
+## Features
 
-**API refinement and validation completed!**
+- **Automated Schema Migrations**: Extract migrations from container images and apply using Atlas
+- **AWS RDS/Aurora Support**: Built-in IAM authentication for AWS managed databases
+- **Pre/Post Checks**: Validate pod versions and metrics before/after migrations
+- **Safety Guards**: Blocks spec changes during active migrations
+- **Observability**: Prometheus metrics, events, and detailed status conditions
 
-✅ API updated - ServiceAccount configuration removed (operator-managed)
-✅ AWS IAM authentication model implemented (operator assumes customer roles)
-✅ Validation webhook added with comprehensive validation tests
-✅ RBAC permissions configured for Jobs, Secrets, Leases, Events
-✅ Sample CRs updated with both self-hosted and AWS examples
-✅ Documentation complete for IAM setup and validation rules  
+## Quick Start
 
-## Project Structure
-
-- `api/v1alpha1/` - DBUpgrade CRD API definitions
-- `controllers/` - Controller implementation
-- `config/` - Kubernetes manifests (CRD, RBAC, samples)
-- `main.go` - Operator entry point
-
-## Building and Running
-
-### Prerequisites
-
-- Go 1.23.x (available locally in `.go-versions/go/` or system installation)
-- kubectl
-- Access to a Kubernetes cluster
-
-### Using the Local Go 1.23.3
+### Installation via Helm
 
 ```bash
-export PATH="$(pwd)/.go-versions/go/bin:$PATH"
+# Add the Helm repository (OCI)
+helm install dbupgrade-operator oci://ghcr.io/subganapathy/automatic-db-upgrades/dbupgrade-operator \
+  --namespace dbupgrade-system --create-namespace
+
+# Or with custom values
+helm install dbupgrade-operator oci://ghcr.io/subganapathy/automatic-db-upgrades/dbupgrade-operator \
+  --namespace dbupgrade-system --create-namespace \
+  -f values.yaml
 ```
 
-### Generate Code and Manifests
+### Kustomize Installation
 
 ```bash
-make generate    # Generate DeepCopy code
-make manifests   # Generate CRD and RBAC manifests
+# Install CRDs and operator
+kubectl apply -k config/default
 ```
 
-### Build
+## Basic Usage
 
-```bash
-make build       # Build the operator binary
+### Self-Hosted Database
+
+```yaml
+apiVersion: dbupgrade.subbug.learning/v1alpha1
+kind: DBUpgrade
+metadata:
+  name: myapp-migration
+spec:
+  migrations:
+    image: myapp:v2.0.0
+    dir: /migrations
+  database:
+    type: selfHosted
+    connection:
+      urlSecretRef:
+        name: db-credentials
+        key: url
 ```
 
-### Running the Operator
+### AWS RDS with IAM Authentication
 
-```bash
-# Install CRDs
-make install
-
-# Run controller locally
-make run
-
-# In another terminal, apply the sample
-kubectl apply -f config/samples/dbupgrade_v1alpha1_dbupgrade.yaml
-
-# Check status (shows print columns)
-kubectl get dbupgrades
-# Output columns: NAME, READY, PROGRESSING, DEGRADED, OBSERVEDGEN
-
-# View detailed status
-kubectl get dbupgrade dbupgrade-sample -o yaml
-
-# Check conditions (primary status surface)
-kubectl get dbupgrade dbupgrade-sample -o jsonpath='{.status.conditions[*]}'
+```yaml
+apiVersion: dbupgrade.subbug.learning/v1alpha1
+kind: DBUpgrade
+metadata:
+  name: myapp-rds-migration
+spec:
+  migrations:
+    image: myapp:v2.0.0
+    dir: /migrations
+  database:
+    type: awsRds
+    aws:
+      roleArn: arn:aws:iam::123456789012:role/myapp-db-migrator
+      region: us-east-1
+      host: mydb.cluster-abc123.us-east-1.rds.amazonaws.com
+      port: 5432
+      dbName: myapp
+      username: migrator
+  runner:
+    activeDeadlineSeconds: 900  # 15 min timeout
 ```
 
-## API Version
+## Pre/Post Migration Checks
 
-- Group: `dbupgrade.subbug.learning`
-- Version: `v1alpha1`
-- Kind: `DBUpgrade`
-- CRD: `dbupgrades.dbupgrade.subbug.learning`
-- Short name: `dbu` (use `kubectl get dbu` instead of `kubectl get dbupgrades`)
+### Pod Version Validation
 
-## Generated Files
+Block migrations until all pods are running the required version:
 
-- CRD: `config/crd/bases/dbupgrade.subbug.learning_dbupgrades.yaml`
-- DeepCopy: `api/v1alpha1/zz_generated.deepcopy.go`
-- RBAC: `config/rbac/role.yaml`
+```yaml
+spec:
+  checks:
+    pre:
+      minPodVersions:
+        - selector:
+            matchLabels:
+              app: myapp
+          minVersion: "2.0.0"
+          containerName: myapp  # optional
+```
 
-## Testing
+### Metric Validation
 
-Note: `make test` requires Go 1.25+ for envtest. The core functionality can be verified with:
+Validate metrics before/after migration (requires prometheus-adapter):
+
+```yaml
+spec:
+  checks:
+    pre:
+      metrics:
+        - name: error-rate-check
+          metricName: http_errors_per_second
+          source: Custom  # or External
+          target:
+            type: Pods
+            pods:
+              selector:
+                matchLabels:
+                  app: myapp
+          threshold:
+            operator: "<"
+            value: "0.05"  # error rate < 5%
+          reduce: Max
+    post:
+      metrics:
+        - name: latency-check
+          metricName: http_request_latency_p99
+          source: Custom
+          target:
+            type: Pods
+            pods:
+              selector:
+                matchLabels:
+                  app: myapp
+          threshold:
+            operator: "<"
+            value: "500"  # p99 latency < 500ms
+          reduce: Max
+          bakeSeconds: 60  # wait 60s before checking
+```
+
+## Setting Up prometheus-adapter
+
+For metric-based pre/post checks, you need [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) installed:
+
+### 1. Install prometheus-adapter
 
 ```bash
-go fmt ./...
-go vet ./...
-make build
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install prometheus-adapter prometheus-community/prometheus-adapter \
+  --namespace monitoring \
+  -f prometheus-adapter-values.yaml
+```
+
+### 2. Configure Custom Metrics
+
+Example `prometheus-adapter-values.yaml`:
+
+```yaml
+prometheus:
+  url: http://prometheus.monitoring.svc
+  port: 9090
+
+rules:
+  custom:
+    - seriesQuery: 'http_requests_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_total$"
+        as: "${1}_per_second"
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[2m])) by (<<.GroupBy>>)'
+
+    - seriesQuery: 'http_request_duration_seconds_bucket{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: ".*"
+        as: "http_request_latency_p99"
+      metricsQuery: 'histogram_quantile(0.99, sum(rate(<<.Series>>{<<.LabelMatchers>>}[5m])) by (le, <<.GroupBy>>))'
+```
+
+### 3. Verify Metrics Are Available
+
+```bash
+# Check custom metrics API
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta2/namespaces/default/pods/*/http_errors_per_second"
 ```
 
 ## Status and Conditions
 
-The `DBUpgrade` status uses Kubernetes-standard conditions to report state:
+The operator uses two conditions to report state:
 
-- **Accepted**: Indicates the spec is valid (`True` with reason `ValidSpec`)
-- **Ready**: Indicates the upgrade is complete and ready (`False` initially with reason `Initializing`)
-- **Progressing**: Indicates an upgrade is in progress (`False` at rest with reason `Idle`)
-- **Degraded**: Indicates the system is in a degraded state (`False` when healthy)
-- **Blocked**: Indicates the upgrade is blocked by some condition
+| Condition | Meaning |
+|-----------|---------|
+| `Ready=True` | Migration completed successfully |
+| `Ready=False, Progressing=True` | Migration in progress |
+| `Ready=False, Progressing=False` | Migration blocked (see Reason) |
 
-Conditions are the primary way to check the status of a `DBUpgrade` resource:
+### Reason Codes
+
+| Reason | Description |
+|--------|-------------|
+| `Initializing` | Setting up for migration |
+| `MigrationInProgress` | Atlas migration running |
+| `MigrationComplete` | Migration succeeded |
+| `JobFailed` | Migration job failed |
+| `JobPending` | Waiting for job to start |
+| `SecretNotFound` | Database credentials not found |
+| `PreCheckImageVersionFailed` | Pod version too low |
+| `PreCheckMetricFailed` | Metric threshold not met |
+| `PostCheckFailed` | Post-migration check failed |
 
 ```bash
-# View all conditions
-kubectl get dbupgrade dbupgrade-sample -o jsonpath='{.status.conditions[*]}'
+# Quick status check
+kubectl get dbu myapp-migration
 
-# Check Ready condition
-kubectl get dbupgrade dbupgrade-sample -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+# Detailed conditions
+kubectl get dbu myapp-migration -o jsonpath='{.status.conditions}'
 ```
 
-The `kubectl get dbupgrades` command shows key conditions in columns for quick status checks.
+## AWS IAM Setup
 
-## Phase 0 Controller Behavior
+### Operator IAM Role
 
-The controller initializes baseline status:
-- Sets `status.observedGeneration = metadata.generation` when spec changes
-- Initializes conditions: Accepted=True, Ready=False, Progressing=False, Degraded=False
-- Uses patch-based status updates to avoid unnecessary updates
-- No Job creation or metrics queries yet (to be implemented in later phases)
+The operator needs permission to assume customer roles:
 
-### Sample CR
-
-```yaml
-apiVersion: dbupgrade.subbug.learning/v1alpha1
-kind: DBUpgrade
-metadata:
-  name: dbupgrade-sample
-spec:
-  migrations:
-    image: "postgres:15-migrations"
-    dir: "/migrations"
-  database:
-    type: "selfHosted"
-    connection:
-      urlSecretRef:
-        name: "db-connection-secret"
-        key: "url"
-```
-
-See `config/samples/dbupgrade_v1alpha1_dbupgrade.yaml` for complete examples.
-
-## AWS RDS/Aurora Authentication
-
-The DBUpgrade operator handles all AWS IAM authentication.
-Migration jobs run as plain pods without IAM roles.
-
-### How it works
-
-1. You specify an IAM `roleArn` in the DBUpgrade spec
-2. The operator (which has EKS Pod Identity) assumes your role
-3. The operator generates a short-lived RDS IAM auth token (valid 15 minutes)
-4. The operator stores the token in a Kubernetes Secret
-5. The migration Job reads the Secret to connect to the database
-
-### IAM Setup Required
-
-**Your IAM Role** (`roleArn` in spec):
-- Must have `rds-db:connect` permission for your database
-- Must have trust policy allowing the operator's IAM role to assume it:
-  ```json
-  {
-    "Effect": "Allow",
-    "Principal": {
-      "AWS": "arn:aws:iam::PLATFORM_ACCOUNT:role/dbupgrade-operator"
-    },
-    "Action": "sts:AssumeRole"
-  }
-  ```
-
-**Operator's IAM Role** (platform-managed):
-- Has EKS Pod Identity
-- Has permission to assume customer roles:
-  ```json
-  {
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
     "Effect": "Allow",
     "Action": "sts:AssumeRole",
     "Resource": "arn:aws:iam::*:role/*-db-migrator"
+  }]
+}
+```
+
+Configure via Helm:
+
+```yaml
+aws:
+  enabled: true
+  region: us-east-1
+  serviceAccountAnnotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::PLATFORM_ACCOUNT:role/dbupgrade-operator
+```
+
+### Customer IAM Role
+
+Your database access role needs:
+
+1. **RDS IAM Authentication**:
+```json
+{
+  "Effect": "Allow",
+  "Action": "rds-db:connect",
+  "Resource": "arn:aws:rds-db:us-east-1:123456789012:dbuser:cluster-id/migrator"
+}
+```
+
+2. **Trust Policy** allowing the operator:
+```json
+{
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::PLATFORM_ACCOUNT:role/dbupgrade-operator"
+  },
+  "Action": "sts:AssumeRole"
+}
+```
+
+## Atlas Migration Best Practices
+
+### Directory Structure
+
+```
+migrations/
+  20240101000000_initial.sql
+  20240115000000_add_users.sql
+  20240201000000_add_orders.sql
+  atlas.sum
+```
+
+### Linting Rules
+
+Add `.atlas.hcl` to your migrations directory:
+
+```hcl
+lint {
+  # Prevent destructive changes
+  destructive {
+    error = true
   }
-  ```
 
-### AWS Example
+  # Require explicit naming for constraints
+  naming {
+    index {
+      match = "^idx_[a-z]+_[a-z]+$"
+    }
+  }
 
-```yaml
-apiVersion: dbupgrade.subbug.learning/v1alpha1
-kind: DBUpgrade
-metadata:
-  name: myapp-upgrade
-spec:
-  migrations:
-    image: "myapp/migrations:v2.0.0"
-  database:
-    type: "awsRds"
-    aws:
-      roleArn: "arn:aws:iam::123456789012:role/myapp-db-migrator"
-      region: "us-east-1"
-      host: "mydb.abc123.us-east-1.rds.amazonaws.com"
-      port: 5432
-      dbName: "myapp"
-      username: "migrator"
-  runner:
-    activeDeadlineSeconds: 900
+  # Detect data-dependent changes
+  data_depend {
+    error = true
+  }
+
+  # Prevent dropping columns without safety period
+  modify_check {
+    error = true
+  }
+}
 ```
 
-## Validation
+### Dangerous Operations
 
-The DBUpgrade webhook validates:
-- Database type matches configuration (e.g., `type=awsRds` requires `aws` or `connection`)
-- AWS configuration has all required fields when specified
-- Metric checks have matching target types (e.g., `type=Pods` requires `target.pods`)
-- Threshold values are valid Kubernetes Quantities
-- **Immutability**: Database configuration fields are immutable after creation
-
-### Immutability Rules
-
-Once a DBUpgrade resource is created, the following fields are **immutable** (cannot be changed):
-- `database.type` - Database type (selfHosted, awsRds, awsAurora)
-- `database.connection.urlSecretRef` - Secret reference for connection string
-- `database.aws.*` - All AWS configuration fields (roleArn, region, host, port, dbName, username)
-
-**Mutable fields** (can be updated after creation):
-- `migrations.image` - Migration container image
-- `migrations.dir` - Directory containing migrations
-- `checks.*` - Pre/post check configurations
-- `runner.activeDeadlineSeconds` - Job timeout
-
-**Rationale**: Database configuration identifies which database is being upgraded. Changing these fields would mean upgrading a different database, which should be a new DBUpgrade resource.
-
-**Note**: The webhook does NOT validate Secret existence (would add latency and require additional RBAC). The controller validates Secret existence at runtime and reports issues via the Degraded condition.
-
-### Validation Examples
-
-```yaml
-# ❌ Invalid - awsRds without AWS config or connection secret
-spec:
-  database:
-    type: awsRds
-
-# ✅ Valid - awsRds with AWS config
-spec:
-  database:
-    type: awsRds
-    aws:
-      roleArn: arn:aws:iam::123:role/migrator
-      region: us-east-1
-      host: db.amazonaws.com
-      dbName: mydb
-      username: migrator
-
-# ❌ Invalid - selfHosted without connection secret
-spec:
-  database:
-    type: selfHosted
-
-# ✅ Valid - selfHosted with connection secret
-spec:
-  database:
-    type: selfHosted
-    connection:
-      urlSecretRef:
-        name: db-secret
-        key: url
-```
+Atlas detects these dangerous operations:
+- `DROP TABLE` / `DROP COLUMN` - Data loss
+- `ALTER COLUMN TYPE` - May fail with existing data
+- `NOT NULL` without default - Fails on existing rows
+- Large table modifications - Potential locks
 
 ## Observability
 
-### Health Checks
+### Prometheus Metrics
 
-The operator exposes standard Kubernetes health probes:
+```yaml
+# Operator heartbeat (absence = operator down)
+dbupgrade_operator_up
 
-- **Liveness probe**: `http://localhost:8081/healthz`
-  - Used by Kubernetes to determine if the pod should be restarted
-  - Returns 200 OK when the operator process is healthy
+# controller-runtime standard metrics
+controller_runtime_reconcile_total
+controller_runtime_reconcile_errors_total
+controller_runtime_reconcile_time_seconds_bucket
+```
 
-- **Readiness probe**: `http://localhost:8081/readyz`
-  - Used by Kubernetes to determine if the pod can receive traffic
-  - Returns 200 OK when the operator is ready to handle requests
+### Example Alerts
 
-### Metrics
+```yaml
+groups:
+- name: dbupgrade
+  rules:
+  - alert: DBUpgradeOperatorDown
+    expr: absent(dbupgrade_operator_up)
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: DBUpgrade operator is down
 
-The operator exposes Prometheus metrics at `http://localhost:8080/metrics`:
+  - alert: DBUpgradeFailed
+    expr: |
+      kube_customresource_dbupgrade_status_condition{
+        condition="Ready",
+        status="false"
+      } == 1
+      and
+      kube_customresource_dbupgrade_status_condition{
+        condition="Progressing",
+        status="false"
+      } == 1
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "DBUpgrade {{ $labels.name }} is stuck"
+```
 
-- **`dbupgrade_operator_up`**: Heartbeat metric (gauge, always 1 when operator is running)
-  - Purpose: Monitor operator availability
-  - Alert on: Absence of this metric indicates the operator process is dead
-  - Example Prometheus alert:
-    ```yaml
-    - alert: DBUpgradeOperatorDown
-      expr: absent(dbupgrade_operator_up)
-      for: 5m
-      annotations:
-        summary: "DBUpgrade operator is down"
-    ```
+## Configuration
 
-- **controller-runtime metrics**: Standard metrics for reconciliation, queue depth, errors, etc.
+### Helm Values
 
-### Monitoring Setup
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `replicaCount` | Number of operator replicas | `1` |
+| `image.repository` | Operator image | `ghcr.io/subganapathy/automatic-db-upgrades` |
+| `image.tag` | Image tag | Chart appVersion |
+| `craneImage` | Crane image for extracting migrations | `gcr.io/go-containerregistry/crane:v0.20.2` |
+| `atlasImage` | Atlas CLI image | `arigaio/atlas:latest` |
+| `webhook.enabled` | Enable validation webhook | `true` |
+| `webhook.certManager.enabled` | Use cert-manager for TLS | `true` |
+| `aws.enabled` | Enable AWS IAM authentication | `false` |
+| `aws.region` | AWS region | `""` |
 
-1. **Scrape configuration** (Prometheus ServiceMonitor):
-   ```yaml
-   apiVersion: monitoring.coreos.com/v1
-   kind: ServiceMonitor
-   metadata:
-     name: dbupgrade-operator
-   spec:
-     selector:
-       matchLabels:
-         app: dbupgrade-operator
-     endpoints:
-     - port: metrics
-       interval: 30s
-   ```
+## Development
 
-2. **Alerting rules**:
-   - Alert on `absent(dbupgrade_operator_up)` for operator availability
-   - Alert on high `controller_runtime_reconcile_errors_total` for reconciliation failures
-   - Alert on `DBUpgrade` resources stuck in Degraded or Blocked conditions
+### Prerequisites
+
+- Go 1.21+
+- kubectl
+- kind (for local testing)
+- Docker
+
+### Local Development
+
+```bash
+# Start kind cluster with local registry
+./e2e/setup-kind.sh
+
+# Build and deploy
+make docker-build IMG=localhost:5000/dbupgrade-operator:dev
+docker push localhost:5000/dbupgrade-operator:dev
+make deploy IMG=localhost:5000/dbupgrade-operator:dev
+
+# Run E2E tests
+./e2e/run-e2e.sh
+```
+
+### Running Tests
+
+```bash
+# Unit tests
+make test
+
+# E2E tests
+./e2e/run-e2e.sh
+```
+
+## License
+
+Apache License 2.0
