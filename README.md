@@ -349,16 +349,43 @@ Your database access role needs:
 }
 ```
 
-2. **Trust Policy** allowing the operator:
+2. **Trust Policy with ExternalId** (required for tenant isolation):
+
+The operator passes an `ExternalId` of `{namespace}/{name}` when assuming roles. Your trust policy **must** require this ExternalId to prevent cross-tenant role assumption attacks.
+
 ```json
 {
-  "Effect": "Allow",
-  "Principal": {
-    "AWS": "arn:aws:iam::PLATFORM_ACCOUNT:role/dbupgrade-operator"
-  },
-  "Action": "sts:AssumeRole"
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::PLATFORM_ACCOUNT:role/dbupgrade-operator"
+    },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "StringEquals": {
+        "sts:ExternalId": "production/myapp-migration"
+      }
+    }
+  }]
 }
 ```
+
+**Important**: The `ExternalId` is automatically set to `{namespace}/{name}` of the DBUpgrade resource:
+- DBUpgrade `production/myapp-migration` → ExternalId `production/myapp-migration`
+- DBUpgrade `staging/api-db-upgrade` → ExternalId `staging/api-db-upgrade`
+
+This ensures:
+- Tenant A cannot assume Tenant B's role (different ExternalId)
+- Roles are scoped to specific DBUpgrade resources
+- CloudTrail logs show which DBUpgrade assumed which role
+
+### Connection Pooling
+
+The operator uses a shared HTTP client with connection pooling for AWS API calls:
+- HTTP connections are reused across reconciles
+- Connection pool: 100 max idle, 20 per host
+- No linear scaling of connections with DBUpgrade count
 
 ## Atlas Migration Best Practices
 

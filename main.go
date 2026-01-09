@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -35,6 +36,7 @@ import (
 
 	dbupgradev1alpha1 "github.com/subganapathy/automatic-db-upgrades/api/v1alpha1"
 	"github.com/subganapathy/automatic-db-upgrades/controllers"
+	awsutil "github.com/subganapathy/automatic-db-upgrades/internal/aws"
 	appmetrics "github.com/subganapathy/automatic-db-upgrades/internal/metrics"
 	//+kubebuilder:scaffold:imports
 )
@@ -55,11 +57,14 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var enableAWS bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.BoolVar(&enableAWS, "enable-aws", false,
+		"Enable AWS RDS/Aurora support. Requires IAM credentials (EKS Pod Identity or IRSA).")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -67,6 +72,11 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Check for AWS enablement via environment variable (for Helm/Kustomize)
+	if os.Getenv("ENABLE_AWS") == "true" {
+		enableAWS = true
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -96,10 +106,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize AWS client manager if AWS support is enabled
+	var awsClientManager *awsutil.ClientManager
+	if enableAWS {
+		setupLog.Info("AWS support enabled, initializing client manager with connection pooling")
+		awsClientManager = awsutil.NewClientManager()
+		if err := awsClientManager.Initialize(context.Background()); err != nil {
+			setupLog.Error(err, "failed to initialize AWS client manager")
+			os.Exit(1)
+		}
+		setupLog.Info("AWS client manager initialized successfully")
+	}
+
 	if err = (&controllers.DBUpgradeReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		RestConfig: mgr.GetConfig(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		RestConfig:       mgr.GetConfig(),
+		AWSClientManager: awsClientManager,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DBUpgrade")
 		os.Exit(1)

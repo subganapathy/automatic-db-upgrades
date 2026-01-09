@@ -27,8 +27,9 @@ import (
 // DBUpgradeReconciler reconciles a DBUpgrade object
 type DBUpgradeReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	RestConfig *rest.Config
+	Scheme           *runtime.Scheme
+	RestConfig       *rest.Config
+	AWSClientManager *awsutil.ClientManager
 }
 
 //+kubebuilder:rbac:groups=dbupgrade.subbug.learning,resources=dbupgrades,verbs=get;list;watch;create;update;patch;delete
@@ -370,22 +371,32 @@ func (r *DBUpgradeReconciler) ensureMigrationSecret(ctx context.Context, dbUpgra
 		connectionURL = customerSecret.Data[customerSecretRef.Key]
 
 	case dbupgradev1alpha1.DatabaseTypeAWSRDS, dbupgradev1alpha1.DatabaseTypeAWSAurora:
-		// Generate RDS IAM auth token
+		// Generate RDS IAM auth token using shared client manager
 		awsCfg := dbUpgrade.Spec.Database.AWS
 		if awsCfg == nil {
 			return nil, fmt.Errorf("database.aws configuration is required for AWS RDS/Aurora")
 		}
 
-		rdsAuthCfg := awsutil.RDSAuthConfig{
-			Region:   awsCfg.Region,
-			Host:     awsCfg.Host,
-			Port:     awsCfg.Port,
-			Username: awsCfg.Username,
-			DBName:   awsCfg.DBName,
-			RoleArn:  awsCfg.RoleArn,
+		if r.AWSClientManager == nil {
+			return nil, fmt.Errorf("AWS client manager not configured - AWS support is disabled")
 		}
 
-		token, err := awsutil.GenerateRDSAuthToken(ctx, rdsAuthCfg)
+		// ExternalID provides tenant isolation: "{namespace}/{name}"
+		// The target role's trust policy must require this exact ExternalID
+		// to prevent cross-tenant role assumption attacks.
+		externalID := fmt.Sprintf("%s/%s", dbUpgrade.Namespace, dbUpgrade.Name)
+
+		rdsAuthCfg := awsutil.RDSAuthConfig{
+			Region:     awsCfg.Region,
+			Host:       awsCfg.Host,
+			Port:       awsCfg.Port,
+			Username:   awsCfg.Username,
+			DBName:     awsCfg.DBName,
+			RoleArn:    awsCfg.RoleArn,
+			ExternalID: externalID,
+		}
+
+		token, err := r.AWSClientManager.GenerateRDSAuthToken(ctx, rdsAuthCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate RDS auth token: %w", err)
 		}
@@ -394,7 +405,10 @@ func (r *DBUpgradeReconciler) ensureMigrationSecret(ctx context.Context, dbUpgra
 		// Atlas expects PostgreSQL URL format
 		url := awsutil.BuildPostgresConnectionURL(rdsAuthCfg, token)
 		connectionURL = []byte(url)
-		logger.Info("Generated RDS IAM auth token", "host", awsCfg.Host, "user", awsCfg.Username)
+		logger.Info("Generated RDS IAM auth token",
+			"host", awsCfg.Host,
+			"user", awsCfg.Username,
+			"externalID", externalID)
 
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbUpgrade.Spec.Database.Type)

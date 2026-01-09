@@ -40,6 +40,8 @@ spec:
             - name: ATLAS_IMAGE
               value: {{ .Values.atlasImage | quote }}
             {{- if .Values.aws.enabled }}
+            - name: ENABLE_AWS
+              value: "true"
             - name: AWS_REGION
               value: {{ .Values.aws.region | quote }}
             {{- end }}
