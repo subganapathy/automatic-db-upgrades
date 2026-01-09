@@ -10,6 +10,54 @@ A production-ready Kubernetes operator for automated database schema migrations 
 - **Safety Guards**: Blocks spec changes during active migrations
 - **Observability**: Prometheus metrics, events, and detailed status conditions
 
+## Development
+
+### Prerequisites
+
+- Go 1.21+
+- kubectl
+- kind (for local testing)
+- Docker
+
+### Local Development
+
+```bash
+# Start kind cluster with local registry
+./e2e/setup-kind.sh
+
+# Build and deploy
+make docker-build IMG=localhost:5000/dbupgrade-operator:dev
+docker push localhost:5000/dbupgrade-operator:dev
+make deploy IMG=localhost:5000/dbupgrade-operator:dev
+
+# Run E2E tests
+./e2e/run-e2e.sh
+```
+
+### Running Tests
+
+```bash
+# Unit tests
+make test
+
+# E2E tests
+./e2e/run-e2e.sh
+```
+
+### Project Structure
+
+```
+├── api/v1alpha1/          # CRD types and webhook validation
+├── controllers/           # Reconciliation logic
+├── internal/
+│   ├── aws/              # AWS client manager, RDS IAM auth
+│   ├── checks/           # Pre/post check implementations
+│   └── metrics/          # Prometheus metrics
+├── charts/               # Helm chart
+├── config/               # Kustomize manifests
+└── e2e/                  # End-to-end tests
+```
+
 ## Design Decisions
 
 ### Architecture: Controller Monitors, Job Executes
@@ -616,40 +664,6 @@ helm install dbupgrade-operator oci://ghcr.io/subganapathy/automatic-db-upgrades
   --set aws.region=us-east-1 \
   --set yace.enabled=true \
   --set prometheusAdapter.enabled=true
-```
-
-## Development
-
-### Prerequisites
-
-- Go 1.21+
-- kubectl
-- kind (for local testing)
-- Docker
-
-### Local Development
-
-```bash
-# Start kind cluster with local registry
-./e2e/setup-kind.sh
-
-# Build and deploy
-make docker-build IMG=localhost:5000/dbupgrade-operator:dev
-docker push localhost:5000/dbupgrade-operator:dev
-make deploy IMG=localhost:5000/dbupgrade-operator:dev
-
-# Run E2E tests
-./e2e/run-e2e.sh
-```
-
-### Running Tests
-
-```bash
-# Unit tests
-make test
-
-# E2E tests
-./e2e/run-e2e.sh
 ```
 
 ## License
