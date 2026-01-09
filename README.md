@@ -10,6 +10,73 @@ A production-ready Kubernetes operator for automated database schema migrations 
 - **Safety Guards**: Blocks spec changes during active migrations
 - **Observability**: Prometheus metrics, events, and detailed status conditions
 
+## Design Decisions
+
+### Architecture: Controller Monitors, Job Executes
+
+The operator follows a clear separation of concerns:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Controller                               │
+│  • Watches DBUpgrade CRs                                        │
+│  • Runs pre-checks (pod versions, metrics)                      │
+│  • Creates/monitors migration Job                               │
+│  • Runs post-checks after Job completion                        │
+│  • Updates status conditions                                    │
+└─────────────────────────────────────────────────────────────────┘
+                              │ creates
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Migration Job                             │
+│  ┌─────────────────┐    ┌─────────────────────────────────────┐ │
+│  │  Init Container │    │          Main Container             │ │
+│  │  (crane)        │───▶│          (atlas)                    │ │
+│  │                 │    │                                     │ │
+│  │  Extracts       │    │  Runs migrations against database   │ │
+│  │  /migrations    │    │  using extracted SQL files          │ │
+│  │  from app image │    │                                     │ │
+│  └─────────────────┘    └─────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why this matters:**
+- **Blast radius containment**: If a migration fails or hangs, only the Job is affected. The controller continues monitoring other DBUpgrades.
+- **Resource isolation**: Migration Jobs can have different resource limits, timeouts (`activeDeadlineSeconds`), and node affinity than the controller.
+- **Restart safety**: Controller can restart without affecting running migrations. It rediscovers Job state on startup.
+- **Debuggability**: Migration logs are in the Job's pod logs, separate from controller logs. Failed Jobs are preserved for inspection.
+
+### Reliability Patterns
+
+| Decision | Why It Matters |
+|----------|----------------|
+| **Namespace-scoped resources** | Migration jobs, secrets, and init containers run in the same namespace as the DBUpgrade CR. Simplifies RBAC, keeps resources colocated, and enables namespace-level isolation. |
+| **Non-blocking baketime** | Post-migration `bakeSeconds` uses timestamp comparison + requeue, not `time.Sleep()`. The controller remains responsive and can handle other reconciles during the bake period. |
+| **Webhook blocks spec changes** | A ValidatingWebhook rejects spec modifications while a migration is running (`Progressing=True`). Prevents mid-flight changes that could cause undefined behavior. |
+| **Owner references for cleanup** | Jobs and secrets have `ownerReferences` pointing to the DBUpgrade CR. Kubernetes garbage collection automatically cleans up resources when the CR is deleted. |
+| **Idempotent reconciliation** | The controller can be restarted at any point. State is reconstructed from the Job status and CR conditions, not in-memory variables. |
+| **Semver strictMode** | Configurable behavior for non-semver image tags. `strictMode: true` (default) fails fast; `strictMode: false` skips non-semver pods gracefully. |
+
+### Security Design
+
+| Decision | Why It Matters |
+|----------|----------------|
+| **No database credentials in controller** | The controller never sees database passwords. For self-hosted DBs, it references secrets by name. For AWS RDS, it generates short-lived IAM tokens directly into Job secrets. |
+| **Minimal RBAC** | Controller only needs: Jobs (create/watch), Secrets (create for migration), Pods (list for version checks), custom metrics API (for metric checks). No cluster-admin required. |
+| **Pod security hardening** | Migration Jobs run as non-root with read-only root filesystem. Only the `/migrations` volume is writable. |
+| **Secret isolation** | Migration secrets are created in the user's namespace, not the operator namespace. Users can apply NetworkPolicies to restrict access. |
+| **Admission validation** | Webhook validates specs at admission time—invalid semver in `minVersion`, missing required fields, and spec changes during migration are rejected before persisting. |
+| **No privilege escalation** | The operator cannot grant more database access than the referenced IAM role or secret provides. It's a pass-through, not a privilege boundary. |
+
+### AWS-Specific Security
+
+| Decision | Why It Matters |
+|----------|----------------|
+| **Shared HTTP connection pool** | A single `ClientManager` with pooled connections (100 max idle, 20 per host) is created at startup. Prevents linear scaling of TCP connections as DBUpgrade count grows. |
+| **ExternalID for tenant isolation** | Every `AssumeRole` call includes `ExternalID={namespace}/{name}`. Customer IAM trust policies **must** require this ExternalID, preventing Tenant A from assuming Tenant B's role (confused deputy prevention). |
+| **Short-lived IAM tokens** | RDS IAM auth tokens are generated per-migration (15 min validity). No long-lived credentials stored; tokens are created just-in-time in ephemeral secrets. |
+| **Role session naming** | STS sessions are named `dbupgrade-operator` for CloudTrail audit trails. Combined with ExternalID, provides full traceability of which DBUpgrade assumed which role. |
+
 ## Quick Start
 
 ### Installation via Helm
